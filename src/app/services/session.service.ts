@@ -3,7 +3,7 @@ import { Subject } from 'rxjs';
 import Peer, { DataConnection } from 'peerjs';
 import { SettingsService } from './settings.service';
 import {
-  ClipMetaMessage,
+  ClipMessage,
   MASTER_TRIGGER_ID,
   ROOM_ID_PREFIX,
   RemoteTriggerMessage,
@@ -28,7 +28,13 @@ export interface ConnectedSlave {
 export interface IncomingClip {
   slaveId: string;
   blob: Blob;
-  triggerMasterTs: number;
+  triggerSeq: number;
+}
+
+export interface LocalTriggerEvent {
+  localTs: number;
+  masterTs: number;
+  triggerSeq: number;
 }
 
 const SYNC_PING_COUNT = 5;
@@ -74,7 +80,7 @@ export class SessionService {
   });
 
   /** Slave only: fires with this device's own clock timestamp (and the original master timestamp) when the master triggers. */
-  readonly localTrigger$ = new Subject<{ localTs: number; masterTs: number }>();
+  readonly localTrigger$ = new Subject<LocalTriggerEvent>();
   /** Master only: fires as each slave's clip arrives. */
   readonly clipReceived$ = new Subject<IncomingClip>();
   /** Master only: fires when the assigned trigger device is a slave reporting a detected release. */
@@ -83,10 +89,11 @@ export class SessionService {
   private peer: Peer | null = null;
   private masterConn: DataConnection | null = null;
   private readonly slaveConns = new Map<string, DataConnection>();
-  private readonly pendingClipMeta = new Map<string, { mimeType: string; triggerMasterTs: number }>();
   /** Slave only: estimated (masterClock - thisDeviceClock) at the same real-world instant. */
   private clockOffsetMs = 0;
   private syncTimer: ReturnType<typeof setInterval> | null = null;
+  /** Master only: monotonically increasing id handed out with each broadcast trigger. */
+  private nextTriggerSeq = 1;
 
   constructor() {
     // Keeps every connected slave's settings (pre/post-roll, chunk size) in step with the
@@ -190,10 +197,12 @@ export class SessionService {
     this.masterRecordsVideo.set(recordsVideo);
   }
 
-  /** Master only: broadcast a trigger (alongside extracting your own local clip, if recording). */
-  broadcastTrigger(masterTs: number): void {
-    const message: TriggerMessage = { type: 'trigger', masterTs };
+  /** Master only: broadcast a trigger (alongside extracting your own local clip, if recording). Returns the sequence id to pass to collectClips. */
+  broadcastTrigger(masterTs: number): number {
+    const triggerSeq = this.nextTriggerSeq++;
+    const message: TriggerMessage = { type: 'trigger', triggerSeq, masterTs };
     this.sendToAllSlaves(message);
+    return triggerSeq;
   }
 
   /** Slave only, when assigned as the trigger device: tell master a release was just detected/requested. */
@@ -204,11 +213,10 @@ export class SessionService {
   }
 
   /** Slave only: send this device's clip back to master for a given trigger. */
-  sendClip(blob: Blob, mimeType: string, triggerMasterTs: number): void {
+  sendClip(blob: Blob, mimeType: string, triggerSeq: number): void {
     if (!this.masterConn?.open) return;
-    const meta: ClipMetaMessage = { type: 'clip-meta', mimeType, triggerMasterTs };
-    this.masterConn.send(meta);
-    this.masterConn.send(blob);
+    const message: ClipMessage = { type: 'clip', triggerSeq, mimeType, data: blob };
+    this.masterConn.send(message);
   }
 
   /** How many slaves are expected to send a clip back right now. */
@@ -220,7 +228,7 @@ export class SessionService {
    * Master only: waits for a clip from every currently-connected slave for this trigger,
    * resolving early once all have arrived, or after `timeoutMs` with whatever did.
    */
-  collectClips(masterTs: number, timeoutMs = 15_000): Promise<Map<string, Blob>> {
+  collectClips(triggerSeq: number, timeoutMs = 15_000): Promise<Map<string, Blob>> {
     const expectedIds = [...this.slaveConns.keys()];
     return new Promise((resolve) => {
       const collected = new Map<string, Blob>();
@@ -240,9 +248,9 @@ export class SessionService {
         resolve(collected);
       };
 
-      const subscription = this.clipReceived$.subscribe(({ slaveId, blob, triggerMasterTs }) => {
-        if (triggerMasterTs !== masterTs) return;
-        collected.set(slaveId, blob);
+      const subscription = this.clipReceived$.subscribe((clip) => {
+        if (clip.triggerSeq !== triggerSeq) return;
+        collected.set(clip.slaveId, clip.blob);
         this.collectionProgress.set({ received: collected.size, expected: expectedIds.length });
         if (collected.size >= expectedIds.length) finish();
       });
@@ -272,7 +280,6 @@ export class SessionService {
 
   private removeSlave(id: string): void {
     this.slaveConns.delete(id);
-    this.pendingClipMeta.delete(id);
     this.connectedSlaves.set(this.connectedSlaves().filter((s) => s.id !== id));
     // The assigned trigger device just left - fall back to the master so the session stays usable.
     if (this.triggerDeviceId() === id) {
@@ -281,33 +288,15 @@ export class SessionService {
   }
 
   private handleMasterIncomingData(conn: DataConnection, data: unknown): void {
-    if (data instanceof Blob) {
-      const meta = this.pendingClipMeta.get(conn.peer);
-      if (meta) {
-        this.pendingClipMeta.delete(conn.peer);
-        this.clipReceived$.next({ slaveId: conn.peer, blob: data, triggerMasterTs: meta.triggerMasterTs });
-      }
-      return;
-    }
-    if (data instanceof ArrayBuffer) {
-      const meta = this.pendingClipMeta.get(conn.peer);
-      if (meta) {
-        this.pendingClipMeta.delete(conn.peer);
-        this.clipReceived$.next({
-          slaveId: conn.peer,
-          blob: new Blob([data], { type: meta.mimeType }),
-          triggerMasterTs: meta.triggerMasterTs,
-        });
-      }
-      return;
-    }
     if (!isSessionMessage(data)) return;
 
     if (data.type === 'sync-ping') {
       const pong: SyncPongMessage = { type: 'sync-pong', sentAt: data.sentAt, receivedAt: performance.now() };
       conn.send(pong);
-    } else if (data.type === 'clip-meta') {
-      this.pendingClipMeta.set(conn.peer, { mimeType: data.mimeType, triggerMasterTs: data.triggerMasterTs });
+    } else if (data.type === 'clip') {
+      const raw = data.data;
+      const blob = raw instanceof Blob ? raw : new Blob([raw], { type: data.mimeType });
+      this.clipReceived$.next({ slaveId: conn.peer, blob, triggerSeq: data.triggerSeq });
     } else if (data.type === 'remote-trigger') {
       this.remoteTriggerRequested$.next(data.estimatedMasterTs);
     }
@@ -333,7 +322,7 @@ export class SessionService {
         // wrong timestamp, which would otherwise make extraction wait far too long and miss
         // the master's clip-collection window entirely.
         const localTs = Math.abs(rawLocalTs - now) > 30_000 ? now : rawLocalTs;
-        this.localTrigger$.next({ localTs, masterTs: data.masterTs });
+        this.localTrigger$.next({ localTs, masterTs: data.masterTs, triggerSeq: data.triggerSeq });
         break;
       }
     }
@@ -377,7 +366,6 @@ export class SessionService {
     }
     for (const conn of this.slaveConns.values()) conn.close();
     this.slaveConns.clear();
-    this.pendingClipMeta.clear();
     this.masterConn?.close();
     this.masterConn = null;
     this.peer?.destroy();
@@ -388,5 +376,6 @@ export class SessionService {
     this.selfId.set(null);
     this.triggerDeviceId.set(MASTER_TRIGGER_ID);
     this.masterRecordsVideo.set(true);
+    this.nextTriggerSeq = 1;
   }
 }

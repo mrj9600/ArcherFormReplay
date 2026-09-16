@@ -80,7 +80,7 @@ export class Record implements OnInit {
         this.status.set(isTrigger ? 'listening' : 'waiting-for-master');
         this.session.localTrigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe(({ localTs, masterTs }) => this.handleSlaveTrigger(localTs, masterTs));
+          .subscribe(({ localTs, triggerSeq }) => this.handleSlaveTrigger(localTs, triggerSeq));
         if (isTrigger) {
           this.soundTrigger.trigger$
             .pipe(takeUntilDestroyed(this.destroyRef))
@@ -117,12 +117,12 @@ export class Record implements OnInit {
     const isMaster = this.session.role() === 'master';
     const recordsVideo = this.recordsVideo();
     const expectedSlaveCount = this.session.expectedClipCount;
-    if (isMaster) this.session.broadcastTrigger(timestamp);
+    const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp) : -1;
 
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
     const [ownBlob, slaveClips] = await Promise.all([
       recordsVideo ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds) : Promise.resolve(null),
-      isMaster ? this.session.collectClips(timestamp) : Promise.resolve(new Map<string, Blob>()),
+      isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve(new Map<string, Blob>()),
     ]);
 
     const items: { deviceLabel: string; blob: Blob }[] = [];
@@ -139,12 +139,12 @@ export class Record implements OnInit {
     void this.router.navigate(['/review']);
   }
 
-  private async handleSlaveTrigger(localTs: number, masterTs: number): Promise<void> {
+  private async handleSlaveTrigger(localTs: number, triggerSeq: number): Promise<void> {
     if (this.status() === 'capturing') return;
     this.status.set('capturing');
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
     const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
-    this.session.sendClip(blob, this.buffer.mimeTypeUsed(), masterTs);
+    this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
     this.status.set(this.session.isTriggerDevice() ? 'listening' : 'waiting-for-master');
   }
 }

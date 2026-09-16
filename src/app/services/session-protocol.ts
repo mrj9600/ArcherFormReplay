@@ -7,6 +7,9 @@ export interface WelcomeMessage {
 
 export interface TriggerMessage {
   type: 'trigger';
+  /** Monotonically increasing id for correlating clips to this trigger. Integers round-trip
+   *  exactly through the wire format; the timestamps below don't reliably (see ClipMessage). */
+  triggerSeq: number;
   /** Trigger timestamp on the master's performance.now() clock. */
   masterTs: number;
 }
@@ -22,10 +25,16 @@ export interface SyncPongMessage {
   receivedAt: number;
 }
 
-export interface ClipMetaMessage {
-  type: 'clip-meta';
+/**
+ * Carries the clip's Blob nested as a property so metadata and data always arrive as a single
+ * atomic message - no separate messages to keep in order or correlate by hand.
+ */
+export interface ClipMessage {
+  type: 'clip';
+  triggerSeq: number;
   mimeType: string;
-  triggerMasterTs: number;
+  /** Sent as a Blob; arrives as an ArrayBuffer after the wire format round-trip. */
+  data: Blob | ArrayBuffer;
 }
 
 export interface TriggerAssignmentMessage {
@@ -45,7 +54,7 @@ export type SessionMessage =
   | TriggerMessage
   | SyncPingMessage
   | SyncPongMessage
-  | ClipMetaMessage
+  | ClipMessage
   | TriggerAssignmentMessage
   | RemoteTriggerMessage;
 
