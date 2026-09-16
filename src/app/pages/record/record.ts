@@ -66,7 +66,7 @@ export class Record implements OnInit {
       let audioStream: MediaStream | null = null;
       if (recordsVideo) {
         const stream = await this.camera.start(undefined, isTrigger);
-        this.buffer.start(stream, this.settings.settings().chunkMs);
+        this.buffer.start(stream);
         if (isTrigger) audioStream = stream;
       } else if (isTrigger) {
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });

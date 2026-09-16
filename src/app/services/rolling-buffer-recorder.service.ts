@@ -8,16 +8,22 @@ interface BufferChunk {
 }
 
 /**
- * Records continuously in small timeslices and keeps a rolling window of recent chunks so a
- * clip can be extracted spanning from *before* a trigger to *after* it.
+ * Records continuously in small timeslices so a clip can be extracted spanning from *before* a
+ * trigger to *after* it.
  *
- * WebM/MP4 chunks from MediaRecorder aren't self-contained after the first one - only the
- * (header + subsequent chunks) of the *same* recording segment concatenate into a playable
- * file. So instead of trimming an ever-growing single recording, the recorder is restarted
- * into a fresh segment right after each clip is extracted (shots are seconds apart, so the
- * next trigger's pre-roll window is comfortably inside the new segment by then), plus an
- * idle safety restart if the app has been armed for a while without a trigger, so memory
- * doesn't grow unbounded and the header segment doesn't get too old.
+ * A clip is built as [segment header, ...every chunk from the segment's start through the
+ * trigger's end] - never a chunk range that *skips* the earlier part of the segment. Video
+ * codecs encode most frames as deltas against earlier reference frames, so a clip built from a
+ * header plus only a late slice of chunks (the segment's real start through some `windowStart`
+ * cut, then jumping to chunks near the trigger) throws away the frames those later chunks
+ * depend on - the result decodes as corrupted/frozen/laggy video. Concatenating multiple
+ * *separate* complete recordings back to back doesn't work either: a `<video>` element only
+ * plays through the first one's data, ignoring anything appended after it.
+ *
+ * So instead, each capture always spans from the current segment's true start. To keep that
+ * from meaning "the whole recording so far", the segment is restarted regularly (idle timer)
+ * and immediately after every capture, bounding how much extra footage a clip can carry before
+ * the part the user actually wanted.
  */
 @Injectable({ providedIn: 'root' })
 export class RollingBufferRecorderService {
@@ -27,21 +33,20 @@ export class RollingBufferRecorderService {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
   private mimeType = '';
-  private chunkMs = 250;
+  private readonly chunkMs = 250;
   private header: BufferChunk | null = null;
   private chunks: BufferChunk[] = [];
-  private segmentStartedAt = 0;
   private idleRestartHandle: ReturnType<typeof setInterval> | null = null;
+  private segmentStartedAt = 0;
   private pendingCaptureUntil = 0;
 
-  private readonly retentionMs = 20_000;
-  private readonly idleRestartCheckMs = 5_000;
-  private readonly idleRestartAfterMs = 60_000;
+  private readonly idleRestartCheckMs = 3_000;
+  /** Roughly the largest configurable pre-roll, so segments rarely need to be older than that. */
+  private readonly idleRestartAfterMs = 10_000;
 
-  start(stream: MediaStream, chunkMs = 250): void {
+  start(stream: MediaStream): void {
     this.stop();
     this.stream = stream;
-    this.chunkMs = chunkMs;
     this.mimeType = pickSupportedMimeType();
     this.mimeTypeUsed.set(this.mimeType || 'video/webm');
     this.beginSegment();
@@ -66,29 +71,22 @@ export class RollingBufferRecorderService {
   }
 
   /**
-   * Waits until postRollSeconds after the trigger has actually been recorded, then slices out
-   * [trigger - preRollSeconds, trigger + postRollSeconds] as a playable Blob.
+   * Waits until postRollSeconds after the trigger has actually been recorded, then returns
+   * everything captured in the current segment up to that point as a playable Blob. The clip
+   * may carry more pre-roll footage than `preRollSeconds` asked for (whatever the segment had),
+   * but never less, and it's always a valid, continuous, correctly-decoding recording.
    */
-  async extractClip(
-    triggerTimestamp: number,
-    preRollSeconds: number,
-    postRollSeconds: number,
-  ): Promise<Blob> {
-    const preRollMs = preRollSeconds * 1000;
-    const postRollMs = postRollSeconds * 1000;
-    const windowStart = triggerTimestamp - preRollMs;
-    const windowEnd = triggerTimestamp + postRollMs;
-
+  async extractClip(triggerTimestamp: number, preRollSeconds: number, postRollSeconds: number): Promise<Blob> {
+    const windowEnd = triggerTimestamp + postRollSeconds * 1000;
     this.pendingCaptureUntil = windowEnd + 500;
+
     const waitMs = windowEnd - performance.now();
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs + this.chunkMs));
     }
 
-    const selected = this.chunks.filter(
-      (chunk) => chunk.timestamp >= windowStart && chunk.timestamp <= windowEnd + this.chunkMs,
-    );
-    const parts = this.header ? [this.header.blob, ...selected.map((c) => c.blob)] : selected.map((c) => c.blob);
+    const included = this.chunks.filter((chunk) => chunk.timestamp <= windowEnd + this.chunkMs);
+    const parts = this.header ? [this.header.blob, ...included.map((c) => c.blob)] : included.map((c) => c.blob);
     const blob = new Blob(parts, { type: this.mimeType || 'video/webm' });
 
     this.restartSegment();
@@ -110,7 +108,6 @@ export class RollingBufferRecorderService {
         this.header = chunk;
       } else {
         this.chunks.push(chunk);
-        this.pruneOldChunks();
       }
     };
     this.recorder.start(this.chunkMs);
@@ -131,13 +128,6 @@ export class RollingBufferRecorderService {
     if (now < this.pendingCaptureUntil) return;
     if (now - this.segmentStartedAt >= this.idleRestartAfterMs) {
       this.restartSegment();
-    }
-  }
-
-  private pruneOldChunks(): void {
-    const cutoff = performance.now() - this.retentionMs;
-    while (this.chunks.length && this.chunks[0].timestamp < cutoff) {
-      this.chunks.shift();
     }
   }
 }
