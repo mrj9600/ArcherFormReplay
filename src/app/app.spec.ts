@@ -16,10 +16,10 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render the app title in the toolbar', async () => {
+  it('should render the bottom nav links', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.app-title')?.textContent).toContain('ArcherFormReplay');
+    expect(compiled.querySelectorAll('.app-nav-link').length).toBe(5);
   });
 });

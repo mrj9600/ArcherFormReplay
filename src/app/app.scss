@@ -5,19 +5,12 @@
   width: 100%;
 }
 
-.app-toolbar {
-  flex: 0 0 auto;
-}
-
-.app-title {
-  font-weight: 600;
-}
-
 .app-content {
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 1rem;
+  padding-top: calc(1rem + env(safe-area-inset-top));
   padding-bottom: calc(1rem + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
