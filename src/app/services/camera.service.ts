@@ -13,14 +13,14 @@ export class CameraService {
     return cameras;
   }
 
-  /** Opens a combined video+audio stream. Audio is included even on slave devices so clips have sound on playback. */
-  async start(deviceId?: string): Promise<MediaStream> {
+  /** Opens a video stream, with audio only when requested (master needs it for release detection; slaves don't). */
+  async start(deviceId?: string, withAudio = true): Promise<MediaStream> {
     this.stop();
     try {
       const video: MediaTrackConstraints = deviceId
         ? { deviceId: { exact: deviceId } }
         : { facingMode: 'environment' };
-      const stream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video, audio: withAudio });
       this.stream.set(stream);
       this.error.set(null);
       await this.listCameras();

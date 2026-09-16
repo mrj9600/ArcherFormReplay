@@ -8,6 +8,7 @@ export interface StoredClip {
 export interface ClipSet {
   capturedAt: number;
   clips: StoredClip[];
+  note?: string;
 }
 
 /** Holds the most recently captured clip (or set of clips, one per device) so Review can play them back. */
@@ -21,11 +22,11 @@ export class ClipStoreService {
     this.setClips([{ deviceLabel: 'You', blob }]);
   }
 
-  setClips(items: { deviceLabel: string; blob: Blob }[]): void {
+  setClips(items: { deviceLabel: string; blob: Blob }[], note?: string): void {
     this.revokeAll();
     const clips = items.map((item) => ({ deviceLabel: item.deviceLabel, url: URL.createObjectURL(item.blob) }));
     this.objectUrls = clips.map((c) => c.url);
-    this.clipSet.set({ capturedAt: Date.now(), clips });
+    this.clipSet.set({ capturedAt: Date.now(), clips, note });
   }
 
   private revokeAll(): void {

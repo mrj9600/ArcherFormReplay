@@ -20,10 +20,18 @@
             <mat-chip color="primary" highlighted>Listening for release</mat-chip>
           }
           @case ('waiting-for-master') {
-            <mat-chip color="primary" highlighted>Connected — waiting for master</mat-chip>
+            @if (session.isSynced()) {
+              <mat-chip color="primary" highlighted>Connected — waiting for master</mat-chip>
+            } @else {
+              <mat-chip>Synchronizing clock…</mat-chip>
+            }
           }
           @case ('capturing') {
-            <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>
+            @if (session.role() === 'master' && session.collectionProgress(); as progress) {
+              <mat-chip color="accent" highlighted>Collecting clips… ({{ progress.received }}/{{ progress.expected }})</mat-chip>
+            } @else {
+              <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>
+            }
           }
         }
       </mat-chip-set>

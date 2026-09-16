@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import Peer, { DataConnection } from 'peerjs';
 import { SettingsService } from './settings.service';
@@ -45,6 +45,10 @@ export class SessionService {
   readonly connectionState = signal<SessionConnectionState>('idle');
   readonly error = signal<string | null>(null);
   readonly connectedSlaves = signal<ConnectedSlave[]>([]);
+  /** Slave only: true once at least one clock-sync round trip has completed. */
+  readonly isSynced = signal(false);
+  /** Master only: live progress while waiting for slave clips after a trigger. */
+  readonly collectionProgress = signal<{ received: number; expected: number } | null>(null);
 
   /** Slave only: fires with this device's own clock timestamp (and the original master timestamp) when the master triggers. */
   readonly localTrigger$ = new Subject<{ localTs: number; masterTs: number }>();
@@ -58,6 +62,19 @@ export class SessionService {
   /** Slave only: estimated (masterClock - thisDeviceClock) at the same real-world instant. */
   private clockOffsetMs = 0;
   private syncTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Keeps every connected slave's settings (pre/post-roll, chunk size) in step with the
+    // master's, including changes made after a slave has already joined.
+    effect(() => {
+      const settings = this.settingsService.settings();
+      if (this.role() !== 'master') return;
+      const message: WelcomeMessage = { type: 'welcome', settings };
+      for (const conn of this.slaveConns.values()) {
+        if (conn.open) conn.send(message);
+      }
+    });
+  }
 
   async startMaster(): Promise<string> {
     this.teardown();
@@ -155,7 +172,7 @@ export class SessionService {
    * Master only: waits for a clip from every currently-connected slave for this trigger,
    * resolving early once all have arrived, or after `timeoutMs` with whatever did.
    */
-  collectClips(masterTs: number, timeoutMs = 10_000): Promise<Map<string, Blob>> {
+  collectClips(masterTs: number, timeoutMs = 15_000): Promise<Map<string, Blob>> {
     const expectedIds = [...this.slaveConns.keys()];
     return new Promise((resolve) => {
       const collected = new Map<string, Blob>();
@@ -163,6 +180,7 @@ export class SessionService {
         resolve(collected);
         return;
       }
+      this.collectionProgress.set({ received: 0, expected: expectedIds.length });
 
       let done = false;
       const finish = () => {
@@ -170,12 +188,14 @@ export class SessionService {
         done = true;
         clearTimeout(timer);
         subscription.unsubscribe();
+        this.collectionProgress.set(null);
         resolve(collected);
       };
 
       const subscription = this.clipReceived$.subscribe(({ slaveId, blob, triggerMasterTs }) => {
         if (triggerMasterTs !== masterTs) return;
         collected.set(slaveId, blob);
+        this.collectionProgress.set({ received: collected.size, expected: expectedIds.length });
         if (collected.size >= expectedIds.length) finish();
       });
       const timer = setTimeout(finish, timeoutMs);
@@ -241,9 +261,16 @@ export class SessionService {
       case 'sync-pong':
         this.applySyncSample(data);
         break;
-      case 'trigger':
-        this.localTrigger$.next({ localTs: data.masterTs - this.clockOffsetMs, masterTs: data.masterTs });
+      case 'trigger': {
+        const rawLocalTs = data.masterTs - this.clockOffsetMs;
+        const now = performance.now();
+        // Guards against an unreliable/not-yet-synced offset (default 0) producing a wildly
+        // wrong timestamp, which would otherwise make extraction wait far too long and miss
+        // the master's clip-collection window entirely.
+        const localTs = Math.abs(rawLocalTs - now) > 30_000 ? now : rawLocalTs;
+        this.localTrigger$.next({ localTs, masterTs: data.masterTs });
         break;
+      }
     }
   }
 
@@ -254,6 +281,7 @@ export class SessionService {
     // masterClock - thisDeviceClock, estimated at the moment this reply arrived.
     const offsetSample = pong.receivedAt - pong.sentAt - oneWayMs;
     this.clockOffsetMs = offsetSample;
+    this.isSynced.set(true);
   }
 
   private startSyncLoop(): void {
@@ -264,7 +292,10 @@ export class SessionService {
       this.masterConn.send(ping);
     };
 
-    // A quick burst on connect to get a usable offset fast, then a steady trickle to track drift.
+    // A quick burst on connect to get a usable offset fast (first ping immediate), then a
+    // steady trickle to track drift.
+    sendPing();
+    pingsSent += 1;
     const burst = setInterval(() => {
       sendPing();
       pingsSent += 1;
@@ -287,5 +318,7 @@ export class SessionService {
     this.peer?.destroy();
     this.peer = null;
     this.clockOffsetMs = 0;
+    this.isSynced.set(false);
+    this.collectionProgress.set(null);
   }
 }

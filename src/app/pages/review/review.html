@@ -1,5 +1,9 @@
 <div class="review-page">
   @if (clipStore.clipSet(); as clipSet) {
+    @if (clipSet.note) {
+      <p class="warning">{{ clipSet.note }}</p>
+    }
+
     <div class="clip-grid" [style.--clip-count]="clipSet.clips.length">
       @for (clip of clipSet.clips; track clip.url) {
         <div class="clip-tile">

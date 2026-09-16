@@ -52,10 +52,10 @@ export class Record implements OnInit {
 
   async ngOnInit(): Promise<void> {
     try {
-      const stream = await this.camera.start();
+      const isSlave = this.session.role() === 'slave';
+      const stream = await this.camera.start(undefined, !isSlave);
       this.buffer.start(stream, this.settings.settings().chunkMs);
 
-      const isSlave = this.session.role() === 'slave';
       if (isSlave) {
         this.status.set('waiting-for-master');
         this.session.localTrigger$
@@ -82,6 +82,7 @@ export class Record implements OnInit {
     this.status.set('capturing');
 
     const isMaster = this.session.role() === 'master';
+    const expectedSlaveCount = this.session.expectedClipCount;
     if (isMaster) this.session.broadcastTrigger(timestamp);
 
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
@@ -96,9 +97,10 @@ export class Record implements OnInit {
       index += 1;
       items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
     }
-    this.clipStore.setClips(items);
+    const missing = expectedSlaveCount - slaveClips.size;
+    this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
 
-    this.status.set(isMaster ? 'listening' : 'listening');
+    this.status.set('listening');
     void this.router.navigate(['/review']);
   }
 
