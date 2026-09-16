@@ -1,2 +1,85 @@
-<h2>Session</h2>
-<p>Master/slave device pairing will live here (phase 3).</p>
+<div class="session-page">
+  @switch (session.role()) {
+    @case ('none') {
+      <p class="hint">
+        Solo works with no session at all — just go to Record. Start a session here only if you have extra
+        devices adding camera angles on the same Wi-Fi or hotspot.
+      </p>
+
+      <div class="role-card">
+        <h2><mat-icon>hub</mat-icon> Be the master</h2>
+        <p>This device listens for the release and shows the combined review afterwards.</p>
+        <button mat-flat-button color="primary" [disabled]="busy()" (click)="startMaster()">
+          Start session
+        </button>
+      </div>
+
+      <div class="role-card">
+        <h2><mat-icon>videocam</mat-icon> Add a camera angle</h2>
+        <p>Enter the code shown on the master device.</p>
+        <input
+          type="text"
+          class="code-input"
+          placeholder="ROOM CODE"
+          maxlength="5"
+          [value]="joinCode()"
+          (input)="onJoinCodeInput($event)"
+        />
+        <button mat-flat-button color="primary" [disabled]="busy() || !joinCode().trim()" (click)="joinAsSlave()">
+          Join session
+        </button>
+      </div>
+
+      @if (session.error()) {
+        <p class="error">{{ session.error() }}</p>
+      }
+    }
+
+    @case ('master') {
+      <div class="status-card">
+        <h2>Master</h2>
+
+        @if (session.connectionState() === 'connecting') {
+          <p>Starting session…</p>
+        } @else if (session.connectionState() === 'connected') {
+          <p>Room code — give this to other devices:</p>
+          <div class="room-code">{{ session.roomCode() }}</div>
+
+          <h3>Connected devices ({{ session.connectedSlaves().length }})</h3>
+          @if (session.connectedSlaves().length === 0) {
+            <p class="hint">Waiting for devices to join…</p>
+          } @else {
+            <ul class="device-list">
+              @for (slave of session.connectedSlaves(); track slave.id) {
+                <li><mat-icon>videocam</mat-icon> {{ slave.id }}</li>
+              }
+            </ul>
+          }
+
+          <p class="hint">Go to Record when ready — the release will trigger every connected device.</p>
+        } @else if (session.connectionState() === 'error') {
+          <p class="error">{{ session.error() }}</p>
+        }
+
+        <button mat-stroked-button (click)="leave()">Leave session</button>
+      </div>
+    }
+
+    @case ('slave') {
+      <div class="status-card">
+        <h2>Camera angle</h2>
+
+        @if (session.connectionState() === 'connecting') {
+          <p>Connecting to {{ joinCode() || session.roomCode() }}…</p>
+        } @else if (session.connectionState() === 'connected') {
+          <p>Connected to room <strong>{{ session.roomCode() }}</strong>.</p>
+          <p class="hint">Go to Record and leave it open — your clip is captured automatically when the master detects a release.</p>
+        } @else if (session.connectionState() === 'error') {
+          <p class="error">{{ session.error() }}</p>
+        }
+
+        <button mat-stroked-button (click)="leave()">Leave session</button>
+      </div>
+    }
+  }
+</div>

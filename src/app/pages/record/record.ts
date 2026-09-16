@@ -10,8 +10,9 @@ import { RollingBufferRecorderService } from '../../services/rolling-buffer-reco
 import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
 import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
+import { SessionService } from '../../services/session.service';
 
-type RecordStatus = 'starting' | 'listening' | 'capturing' | 'error';
+type RecordStatus = 'starting' | 'listening' | 'waiting-for-master' | 'capturing' | 'error';
 
 @Component({
   selector: 'app-record',
@@ -24,6 +25,7 @@ export class Record implements OnInit {
   protected readonly buffer = inject(RollingBufferRecorderService);
   protected readonly soundTrigger = inject(SoundTriggerService);
   protected readonly settings = inject(SettingsService);
+  protected readonly session = inject(SessionService);
   private readonly clipStore = inject(ClipStoreService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -52,12 +54,20 @@ export class Record implements OnInit {
     try {
       const stream = await this.camera.start();
       this.buffer.start(stream, this.settings.settings().chunkMs);
-      this.soundTrigger.start(stream, this.settings.settings().micSensitivity);
-      this.status.set('listening');
 
-      this.soundTrigger.trigger$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(({ timestamp }) => {
-        this.handleTrigger(timestamp);
-      });
+      const isSlave = this.session.role() === 'slave';
+      if (isSlave) {
+        this.status.set('waiting-for-master');
+        this.session.localTrigger$
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe(({ localTs, masterTs }) => this.handleSlaveTrigger(localTs, masterTs));
+      } else {
+        this.soundTrigger.start(stream, this.settings.settings().micSensitivity);
+        this.status.set('listening');
+        this.soundTrigger.trigger$
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe(({ timestamp }) => this.handleLocalTrigger(timestamp));
+      }
     } catch {
       this.status.set('error');
     }
@@ -67,13 +77,37 @@ export class Record implements OnInit {
     this.soundTrigger.manualTrigger();
   }
 
-  private async handleTrigger(timestamp: number): Promise<void> {
+  private async handleLocalTrigger(timestamp: number): Promise<void> {
+    if (this.status() === 'capturing') return;
+    this.status.set('capturing');
+
+    const isMaster = this.session.role() === 'master';
+    if (isMaster) this.session.broadcastTrigger(timestamp);
+
+    const { preRollSeconds, postRollSeconds } = this.settings.settings();
+    const [ownBlob, slaveClips] = await Promise.all([
+      this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds),
+      isMaster ? this.session.collectClips(timestamp) : Promise.resolve(new Map<string, Blob>()),
+    ]);
+
+    const items = [{ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob }];
+    let index = 1;
+    for (const [slaveId, blob] of slaveClips) {
+      index += 1;
+      items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
+    }
+    this.clipStore.setClips(items);
+
+    this.status.set(isMaster ? 'listening' : 'listening');
+    void this.router.navigate(['/review']);
+  }
+
+  private async handleSlaveTrigger(localTs: number, masterTs: number): Promise<void> {
     if (this.status() === 'capturing') return;
     this.status.set('capturing');
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
-    const blob = await this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds);
-    this.clipStore.setClip(blob);
-    this.status.set('listening');
-    void this.router.navigate(['/review']);
+    const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
+    this.session.sendClip(blob, this.buffer.mimeTypeUsed(), masterTs);
+    this.status.set('waiting-for-master');
   }
 }

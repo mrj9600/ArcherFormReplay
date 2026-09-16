@@ -1,9 +1,29 @@
 <div class="review-page">
-  @if (clipStore.clip(); as clip) {
-    <video #player [src]="clip.url" controls playsinline class="player"></video>
+  @if (clipStore.clipSet(); as clipSet) {
+    <div class="clip-grid" [style.--clip-count]="clipSet.clips.length">
+      @for (clip of clipSet.clips; track clip.url) {
+        <div class="clip-tile">
+          <span class="clip-label">{{ clip.deviceLabel }}</span>
+          <video #player [src]="clip.url" controls playsinline class="player"></video>
+        </div>
+      }
+    </div>
 
     @if (settingsService.settings().autoplayDelaySeconds > 0) {
       <p class="autoplay-hint">Auto-playing in {{ settingsService.settings().autoplayDelaySeconds }}s…</p>
+    }
+
+    @if (clipSet.clips.length > 1) {
+      <div class="bulk-controls">
+        <button mat-stroked-button (click)="playAll()">
+          <mat-icon>play_arrow</mat-icon>
+          Play all
+        </button>
+        <button mat-stroked-button (click)="pauseAll()">
+          <mat-icon>pause</mat-icon>
+          Pause all
+        </button>
+      </div>
     }
 
     <div class="rate-control">

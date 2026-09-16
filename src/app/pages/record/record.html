@@ -19,6 +19,9 @@
           @case ('listening') {
             <mat-chip color="primary" highlighted>Listening for release</mat-chip>
           }
+          @case ('waiting-for-master') {
+            <mat-chip color="primary" highlighted>Connected — waiting for master</mat-chip>
+          }
           @case ('capturing') {
             <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>
           }
@@ -26,14 +29,18 @@
       </mat-chip-set>
     </div>
 
-    <div class="level-meter">
-      <span>Mic level</span>
-      <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
-    </div>
+    @if (session.role() !== 'slave') {
+      <div class="level-meter">
+        <span>Mic level</span>
+        <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
+      </div>
 
-    <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
-      <mat-icon>bolt</mat-icon>
-      Test trigger
-    </button>
+      <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
+        <mat-icon>bolt</mat-icon>
+        Test trigger
+      </button>
+    } @else {
+      <p class="hint">This device is a camera angle in the session — the clip is captured automatically when the master detects a release.</p>
+    }
   }
 </div>
