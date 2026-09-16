@@ -28,7 +28,7 @@
 
     <div class="level-meter">
       <span>Mic level</span>
-      <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * 400 > 100 ? 100 : soundTrigger.level() * 400"></mat-progress-bar>
+      <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
     </div>
 
     <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">

@@ -3,7 +3,7 @@ import { Injectable, signal } from '@angular/core';
 export interface AppSettings {
   preRollSeconds: number;
   postRollSeconds: number;
-  /** RMS amplitude (0-1) the mic must exceed to count as a release. */
+  /** Peak amplitude (0-1) the mic must exceed to count as a release. */
   micSensitivity: number;
   chunkMs: number;
   /** Seconds to wait after a clip is ready before playback starts automatically. 0 disables autoplay. */
@@ -13,7 +13,7 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   preRollSeconds: 3,
   postRollSeconds: 2,
-  micSensitivity: 0.05,
+  micSensitivity: 0.04,
   chunkMs: 250,
   autoplayDelaySeconds: 2,
 };

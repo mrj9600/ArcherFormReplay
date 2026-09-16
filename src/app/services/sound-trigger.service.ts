@@ -5,12 +5,15 @@ export interface TriggerEvent {
   timestamp: number;
 }
 
+/** Multiplier used to stretch the 0-1 peak amplitude into a more readable 0-100% meter. */
+export const METER_DISPLAY_SCALE = 250;
+
 /** Listens to a mic stream and fires a trigger when a loud, sudden sound (the arrow release) is detected. */
 @Injectable({ providedIn: 'root' })
 export class SoundTriggerService {
   readonly trigger$ = new Subject<TriggerEvent>();
   readonly isListening = signal(false);
-  /** Current RMS level (0-1ish), for a live meter in the UI. */
+  /** Current peak amplitude (0-1), for a live meter in the UI. Peak (not RMS) responds better to a short, sharp release sound. */
   readonly level = signal(0);
 
   private audioContext: AudioContext | null = null;
@@ -27,7 +30,7 @@ export class SoundTriggerService {
     this.audioContext = new AudioContext();
     this.source = this.audioContext.createMediaStreamSource(stream);
     this.analyser = this.audioContext.createAnalyser();
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = 1024;
     this.source.connect(this.analyser);
     this.isListening.set(true);
     this.loop();
@@ -60,13 +63,15 @@ export class SoundTriggerService {
     const data = new Float32Array(this.analyser.fftSize);
     this.analyser.getFloatTimeDomainData(data);
 
-    let sumSquares = 0;
-    for (const sample of data) sumSquares += sample * sample;
-    const rms = Math.sqrt(sumSquares / data.length);
-    this.level.set(rms);
+    let peak = 0;
+    for (const sample of data) {
+      const abs = Math.abs(sample);
+      if (abs > peak) peak = abs;
+    }
+    this.level.set(peak);
 
     const now = performance.now();
-    if (rms >= this.threshold && now - this.lastTriggerAt > this.refractoryMs) {
+    if (peak >= this.threshold && now - this.lastTriggerAt > this.refractoryMs) {
       this.emitTrigger(now);
     }
 

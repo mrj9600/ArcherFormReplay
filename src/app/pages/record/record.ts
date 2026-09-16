@@ -7,7 +7,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatChipsModule } from '@angular/material/chips';
 import { CameraService } from '../../services/camera.service';
 import { RollingBufferRecorderService } from '../../services/rolling-buffer-recorder.service';
-import { SoundTriggerService } from '../../services/sound-trigger.service';
+import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
 import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
 
@@ -30,6 +30,7 @@ export class Record implements OnInit {
 
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
   protected readonly status = signal<RecordStatus>('starting');
+  protected readonly meterScale = METER_DISPLAY_SCALE;
 
   constructor() {
     effect(() => {
