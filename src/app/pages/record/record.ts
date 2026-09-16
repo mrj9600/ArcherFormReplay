@@ -39,6 +39,10 @@ export class Record implements OnInit {
   /** Master always gets a manual override; a slave only gets one when it's the assigned trigger device. */
   protected readonly showTestButton = computed(() => this.session.role() !== 'slave' || this.session.isTriggerDevice());
 
+  private readonly isReady = signal(false);
+  private micOnlyStream: MediaStream | null = null;
+  private acquiringMic = false;
+
   constructor() {
     effect(() => {
       const video = this.videoRef()?.nativeElement;
@@ -48,10 +52,48 @@ export class Record implements OnInit {
       }
     });
 
+    // Keeps sound detection in sync with which device is currently assigned as the trigger
+    // device - this can change (from the Session page) *after* this page has already mounted,
+    // e.g. right after a slave joins with no mic yet and is then promoted to trigger device.
+    effect(() => {
+      if (!this.isReady()) return;
+      const isTrigger = this.session.isTriggerDevice();
+
+      if (!isTrigger) {
+        this.soundTrigger.stop();
+        if (this.micOnlyStream) {
+          this.micOnlyStream.getTracks().forEach((track) => track.stop());
+          this.micOnlyStream = null;
+        }
+        this.syncIdleStatus();
+        return;
+      }
+
+      const cameraStream = this.camera.stream();
+      if (this.recordsVideo() && cameraStream && cameraStream.getAudioTracks().length > 0) {
+        this.soundTrigger.start(cameraStream, this.settings.settings().micSensitivity);
+        this.syncIdleStatus();
+      } else if (!this.micOnlyStream && !this.acquiringMic) {
+        this.acquiringMic = true;
+        navigator.mediaDevices
+          .getUserMedia({ audio: true })
+          .then((stream) => {
+            this.micOnlyStream = stream;
+            this.soundTrigger.start(stream, this.settings.settings().micSensitivity);
+            this.syncIdleStatus();
+          })
+          .catch(() => this.status.set('error'))
+          .finally(() => {
+            this.acquiringMic = false;
+          });
+      }
+    });
+
     this.destroyRef.onDestroy(() => {
       this.soundTrigger.stop();
       this.buffer.stop();
       this.camera.stop();
+      this.micOnlyStream?.getTracks().forEach((track) => track.stop());
     });
   }
 
@@ -59,35 +101,27 @@ export class Record implements OnInit {
     try {
       const role = this.session.role();
       const isSlave = role === 'slave';
-      const isTrigger = this.session.isTriggerDevice();
       const recordsVideo = isSlave ? true : this.session.masterRecordsVideo();
       this.recordsVideo.set(recordsVideo);
 
-      let audioStream: MediaStream | null = null;
       if (recordsVideo) {
-        const stream = await this.camera.start(undefined, isTrigger);
+        // Audio is only baked into the recording if this device was already the trigger device
+        // when recording started; that can't change later without restarting the buffer (and
+        // losing its history), so a later trigger-device reassignment only affects live
+        // detection (handled reactively above), not whether the recorded clip itself has sound.
+        const withAudio = this.session.isTriggerDevice();
+        const stream = await this.camera.start(undefined, withAudio);
         this.buffer.start(stream);
-        if (isTrigger) audioStream = stream;
-      } else if (isTrigger) {
-        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-
-      if (isTrigger && audioStream) {
-        this.soundTrigger.start(audioStream, this.settings.settings().micSensitivity);
       }
 
       if (isSlave) {
-        this.status.set(isTrigger ? 'listening' : 'waiting-for-master');
         this.session.localTrigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe(({ localTs, triggerSeq }) => this.handleSlaveTrigger(localTs, triggerSeq));
-        if (isTrigger) {
-          this.soundTrigger.trigger$
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe(({ timestamp }) => this.session.reportLocalTrigger(timestamp));
-        }
+        this.soundTrigger.trigger$
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe(({ timestamp }) => this.session.reportLocalTrigger(timestamp));
       } else {
-        this.status.set(isTrigger ? 'listening' : 'coordinating');
         this.soundTrigger.trigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe(({ timestamp }) => this.handleLocalTrigger(timestamp));
@@ -97,6 +131,9 @@ export class Record implements OnInit {
             .subscribe((estimatedMasterTs) => this.handleLocalTrigger(estimatedMasterTs));
         }
       }
+
+      this.isReady.set(true);
+      this.syncIdleStatus();
     } catch {
       this.status.set('error');
     }
@@ -108,6 +145,17 @@ export class Record implements OnInit {
       return;
     }
     this.soundTrigger.manualTrigger();
+  }
+
+  private syncIdleStatus(): void {
+    if (this.status() === 'capturing' || this.status() === 'error' || this.status() === 'starting') return;
+    const isSlave = this.session.role() === 'slave';
+    const isTrigger = this.session.isTriggerDevice();
+    if (isSlave) {
+      this.status.set(isTrigger ? 'listening' : 'waiting-for-master');
+    } else {
+      this.status.set(isTrigger ? 'listening' : 'coordinating');
+    }
   }
 
   private async handleLocalTrigger(timestamp: number): Promise<void> {
@@ -135,7 +183,7 @@ export class Record implements OnInit {
     const missing = expectedSlaveCount - slaveClips.size;
     this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
 
-    this.status.set(this.session.isTriggerDevice() ? 'listening' : 'coordinating');
+    this.syncIdleStatus();
     void this.router.navigate(['/review']);
   }
 
@@ -145,6 +193,6 @@ export class Record implements OnInit {
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
     const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
     this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
-    this.status.set(this.session.isTriggerDevice() ? 'listening' : 'waiting-for-master');
+    this.syncIdleStatus();
   }
 }
