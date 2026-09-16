@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { pickSupportedMimeType } from './media-format';
+import { trimClip } from './clip-trimmer';
 
 interface BufferChunk {
   blob: Blob;
@@ -20,10 +21,13 @@ interface BufferChunk {
  * *separate* complete recordings back to back doesn't work either: a `<video>` element only
  * plays through the first one's data, ignoring anything appended after it.
  *
- * So instead, each capture always spans from the current segment's true start. To keep that
- * from meaning "the whole recording so far", the segment is restarted regularly (idle timer)
- * and immediately after every capture, bounding how much extra footage a clip can carry before
- * the part the user actually wanted.
+ * So instead, each capture always spans from the current segment's true start - which is always
+ * valid, but its length depends on essentially random timing (however long the segment happened
+ * to be running) rather than the configured pre-roll/post-roll. That raw capture is then trimmed
+ * down to the exact requested window via clip-trimmer.ts (WebCodecs-based re-encode through
+ * mediabunny), which can cut anywhere, not just at chunk/keyframe boundaries. The segment is
+ * still restarted regularly so the *raw* capture (and therefore the trim work) doesn't grow
+ * unbounded during a long idle wait.
  */
 @Injectable({ providedIn: 'root' })
 export class RollingBufferRecorderService {
@@ -41,8 +45,9 @@ export class RollingBufferRecorderService {
   private pendingCaptureUntil = 0;
 
   private readonly idleRestartCheckMs = 3_000;
-  /** Roughly the largest configurable pre-roll, so segments rarely need to be older than that. */
-  private readonly idleRestartAfterMs = 10_000;
+  /** Comfortably longer than the largest configurable pre-roll (10s), so there's usually enough
+   *  history to trim from; exact output length no longer depends on this once trimmed. */
+  private readonly idleRestartAfterMs = 20_000;
 
   start(stream: MediaStream): void {
     this.stop();
@@ -71,12 +76,13 @@ export class RollingBufferRecorderService {
   }
 
   /**
-   * Waits until postRollSeconds after the trigger has actually been recorded, then returns
-   * everything captured in the current segment up to that point as a playable Blob. The clip
-   * may carry more pre-roll footage than `preRollSeconds` asked for (whatever the segment had),
-   * but never less, and it's always a valid, continuous, correctly-decoding recording.
+   * Waits until postRollSeconds after the trigger has actually been recorded, then trims the
+   * segment down to exactly [trigger - preRollSeconds, trigger + postRollSeconds]. If the
+   * segment doesn't have that much pre-roll history yet (e.g. it just restarted), the clip
+   * starts as early as it can rather than failing - shorter than requested, never corrupted.
    */
   async extractClip(triggerTimestamp: number, preRollSeconds: number, postRollSeconds: number): Promise<Blob> {
+    const windowStart = triggerTimestamp - preRollSeconds * 1000;
     const windowEnd = triggerTimestamp + postRollSeconds * 1000;
     this.pendingCaptureUntil = windowEnd + 500;
 
@@ -85,12 +91,22 @@ export class RollingBufferRecorderService {
       await new Promise((resolve) => setTimeout(resolve, waitMs + this.chunkMs));
     }
 
+    const segmentStartedAt = this.segmentStartedAt;
+    const mimeType = this.mimeType || 'video/webm';
     const included = this.chunks.filter((chunk) => chunk.timestamp <= windowEnd + this.chunkMs);
     const parts = this.header ? [this.header.blob, ...included.map((c) => c.blob)] : included.map((c) => c.blob);
-    const blob = new Blob(parts, { type: this.mimeType || 'video/webm' });
+    const rawBlob = new Blob(parts, { type: mimeType });
 
     this.restartSegment();
-    return blob;
+
+    try {
+      const startSec = (windowStart - segmentStartedAt) / 1000;
+      const endSec = (windowEnd - segmentStartedAt) / 1000;
+      return await trimClip(rawBlob, startSec, endSec, mimeType);
+    } catch (err) {
+      console.error('Clip trim failed, using untrimmed capture instead', err);
+      return rawBlob;
+    }
   }
 
   private beginSegment(): void {
