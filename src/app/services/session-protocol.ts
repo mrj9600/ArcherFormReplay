@@ -28,12 +28,29 @@ export interface ClipMetaMessage {
   triggerMasterTs: number;
 }
 
+export interface TriggerAssignmentMessage {
+  type: 'trigger-assignment';
+  /** MASTER_TRIGGER_ID, or a slave's PeerJS id. */
+  triggerDeviceId: string;
+}
+
+export interface RemoteTriggerMessage {
+  type: 'remote-trigger';
+  /** The reporting device's local detection timestamp, already converted to the master's clock. */
+  estimatedMasterTs: number;
+}
+
 export type SessionMessage =
   | WelcomeMessage
   | TriggerMessage
   | SyncPingMessage
   | SyncPongMessage
-  | ClipMetaMessage;
+  | ClipMetaMessage
+  | TriggerAssignmentMessage
+  | RemoteTriggerMessage;
+
+/** Sentinel triggerDeviceId meaning "the master itself", since the master has no PeerJS id from its own perspective worth tracking separately. */
+export const MASTER_TRIGGER_ID = '__master__';
 
 export function isSessionMessage(data: unknown): data is SessionMessage {
   return typeof data === 'object' && data !== null && typeof (data as { type?: unknown }).type === 'string';

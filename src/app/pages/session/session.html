@@ -56,6 +56,24 @@
             </ul>
           }
 
+          <div class="setting">
+            <label for="triggerDevice">
+              <mat-icon>graphic_eq</mat-icon>
+              Trigger device (listens for the release sound)
+            </label>
+            <select id="triggerDevice" [value]="session.triggerDeviceId()" (change)="onTriggerDeviceChange($event)">
+              <option [value]="masterTriggerId">You (master)</option>
+              @for (slave of session.connectedSlaves(); track slave.id) {
+                <option [value]="slave.id">{{ slave.id }}</option>
+              }
+            </select>
+          </div>
+
+          <label class="toggle-row">
+            <input type="checkbox" [checked]="session.masterRecordsVideo()" (change)="onMasterRecordsVideoChange($event)" />
+            Master records video too
+          </label>
+
           <p class="hint">Go to Record when ready — the release will trigger every connected device.</p>
         } @else if (session.connectionState() === 'error') {
           <p class="error">{{ session.error() }}</p>
@@ -73,7 +91,11 @@
           <p>Connecting to {{ joinCode() || session.roomCode() }}…</p>
         } @else if (session.connectionState() === 'connected') {
           <p>Connected to room <strong>{{ session.roomCode() }}</strong>.</p>
-          <p class="hint">Go to Record and leave it open — your clip is captured automatically when the master detects a release.</p>
+          @if (session.isTriggerDevice()) {
+            <p class="hint">This device is the trigger — it listens for the release sound.</p>
+          } @else {
+            <p class="hint">Go to Record and leave it open — your clip is captured automatically when the trigger device detects a release.</p>
+          }
         } @else if (session.connectionState() === 'error') {
           <p class="error">{{ session.error() }}</p>
         }

@@ -12,8 +12,8 @@ export class App {
   protected readonly navLinks = [
     { path: '/home', label: 'Home', icon: 'home' },
     { path: '/record', label: 'Record', icon: 'videocam' },
-    { path: '/session', label: 'Session', icon: 'devices' },
     { path: '/review', label: 'Review', icon: 'play_circle' },
+    { path: '/session', label: 'Session', icon: 'devices' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
 }

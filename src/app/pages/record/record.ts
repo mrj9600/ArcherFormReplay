@@ -1,4 +1,5 @@
-import { Component, DestroyRef, ElementRef, OnInit, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -12,11 +13,11 @@ import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
 import { SessionService } from '../../services/session.service';
 
-type RecordStatus = 'starting' | 'listening' | 'waiting-for-master' | 'capturing' | 'error';
+type RecordStatus = 'starting' | 'listening' | 'waiting-for-master' | 'coordinating' | 'capturing' | 'error';
 
 @Component({
   selector: 'app-record',
-  imports: [MatButtonModule, MatIconModule, MatProgressBarModule, MatChipsModule],
+  imports: [MatButtonModule, MatIconModule, MatProgressBarModule, MatChipsModule, NgTemplateOutlet],
   templateUrl: './record.html',
   styleUrl: './record.scss',
 })
@@ -33,6 +34,10 @@ export class Record implements OnInit {
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
   protected readonly status = signal<RecordStatus>('starting');
   protected readonly meterScale = METER_DISPLAY_SCALE;
+  protected readonly recordsVideo = signal(true);
+
+  /** Master always gets a manual override; a slave only gets one when it's the assigned trigger device. */
+  protected readonly showTestButton = computed(() => this.session.role() !== 'slave' || this.session.isTriggerDevice());
 
   constructor() {
     effect(() => {
@@ -52,21 +57,45 @@ export class Record implements OnInit {
 
   async ngOnInit(): Promise<void> {
     try {
-      const isSlave = this.session.role() === 'slave';
-      const stream = await this.camera.start(undefined, !isSlave);
-      this.buffer.start(stream, this.settings.settings().chunkMs);
+      const role = this.session.role();
+      const isSlave = role === 'slave';
+      const isTrigger = this.session.isTriggerDevice();
+      const recordsVideo = isSlave ? true : this.session.masterRecordsVideo();
+      this.recordsVideo.set(recordsVideo);
+
+      let audioStream: MediaStream | null = null;
+      if (recordsVideo) {
+        const stream = await this.camera.start(undefined, isTrigger);
+        this.buffer.start(stream, this.settings.settings().chunkMs);
+        if (isTrigger) audioStream = stream;
+      } else if (isTrigger) {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
+      if (isTrigger && audioStream) {
+        this.soundTrigger.start(audioStream, this.settings.settings().micSensitivity);
+      }
 
       if (isSlave) {
-        this.status.set('waiting-for-master');
+        this.status.set(isTrigger ? 'listening' : 'waiting-for-master');
         this.session.localTrigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe(({ localTs, masterTs }) => this.handleSlaveTrigger(localTs, masterTs));
+        if (isTrigger) {
+          this.soundTrigger.trigger$
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(({ timestamp }) => this.session.reportLocalTrigger(timestamp));
+        }
       } else {
-        this.soundTrigger.start(stream, this.settings.settings().micSensitivity);
-        this.status.set('listening');
+        this.status.set(isTrigger ? 'listening' : 'coordinating');
         this.soundTrigger.trigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe(({ timestamp }) => this.handleLocalTrigger(timestamp));
+        if (role === 'master') {
+          this.session.remoteTriggerRequested$
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe((estimatedMasterTs) => this.handleLocalTrigger(estimatedMasterTs));
+        }
       }
     } catch {
       this.status.set('error');
@@ -74,6 +103,10 @@ export class Record implements OnInit {
   }
 
   protected testTrigger(): void {
+    if (this.session.role() === 'slave') {
+      if (this.session.isTriggerDevice()) this.session.reportLocalTrigger(performance.now());
+      return;
+    }
     this.soundTrigger.manualTrigger();
   }
 
@@ -82,16 +115,18 @@ export class Record implements OnInit {
     this.status.set('capturing');
 
     const isMaster = this.session.role() === 'master';
+    const recordsVideo = this.recordsVideo();
     const expectedSlaveCount = this.session.expectedClipCount;
     if (isMaster) this.session.broadcastTrigger(timestamp);
 
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
     const [ownBlob, slaveClips] = await Promise.all([
-      this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds),
+      recordsVideo ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds) : Promise.resolve(null),
       isMaster ? this.session.collectClips(timestamp) : Promise.resolve(new Map<string, Blob>()),
     ]);
 
-    const items = [{ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob }];
+    const items: { deviceLabel: string; blob: Blob }[] = [];
+    if (ownBlob) items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob });
     let index = 1;
     for (const [slaveId, blob] of slaveClips) {
       index += 1;
@@ -100,7 +135,7 @@ export class Record implements OnInit {
     const missing = expectedSlaveCount - slaveClips.size;
     this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
 
-    this.status.set('listening');
+    this.status.set(this.session.isTriggerDevice() ? 'listening' : 'coordinating');
     void this.router.navigate(['/review']);
   }
 
@@ -110,6 +145,6 @@ export class Record implements OnInit {
     const { preRollSeconds, postRollSeconds } = this.settings.settings();
     const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
     this.session.sendClip(blob, this.buffer.mimeTypeUsed(), masterTs);
-    this.status.set('waiting-for-master');
+    this.status.set(this.session.isTriggerDevice() ? 'listening' : 'waiting-for-master');
   }
 }

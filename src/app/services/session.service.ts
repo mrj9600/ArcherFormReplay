@@ -1,13 +1,16 @@
-import { Injectable, effect, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import Peer, { DataConnection } from 'peerjs';
 import { SettingsService } from './settings.service';
 import {
   ClipMetaMessage,
+  MASTER_TRIGGER_ID,
   ROOM_ID_PREFIX,
+  RemoteTriggerMessage,
   SessionMessage,
   SyncPingMessage,
   SyncPongMessage,
+  TriggerAssignmentMessage,
   TriggerMessage,
   WelcomeMessage,
   generateRoomCode,
@@ -33,8 +36,10 @@ const SYNC_INTERVAL_MS = 15_000;
 
 /**
  * Owns the PeerJS connection(s) for a pairing session and speaks the small JSON+binary
- * protocol in session-protocol.ts. One device is "master" (creates the room, detects the
- * release, broadcasts the trigger); others join as "slave" and send their clip back.
+ * protocol in session-protocol.ts. One device is "master" (creates the room, coordinates
+ * clip collection); others join as "slave" and send their clip back. Either the master or
+ * any connected slave can be assigned as the "trigger device" - the one whose microphone
+ * actually detects the release - independent of who's hosting the session.
  */
 @Injectable({ providedIn: 'root' })
 export class SessionService {
@@ -49,11 +54,31 @@ export class SessionService {
   readonly isSynced = signal(false);
   /** Master only: live progress while waiting for slave clips after a trigger. */
   readonly collectionProgress = signal<{ received: number; expected: number } | null>(null);
+  /** This device's own PeerJS id, once known. */
+  readonly selfId = signal<string | null>(null);
+  /** MASTER_TRIGGER_ID, or a connected slave's id - whichever device's mic drives detection. */
+  readonly triggerDeviceId = signal<string>(MASTER_TRIGGER_ID);
+  /** Master only: whether the master device itself captures a video clip. */
+  readonly masterRecordsVideo = signal(true);
+
+  /** True if THIS device is the one currently assigned to detect the release. */
+  readonly isTriggerDevice = computed(() => {
+    switch (this.role()) {
+      case 'none':
+        return true;
+      case 'master':
+        return this.triggerDeviceId() === MASTER_TRIGGER_ID;
+      case 'slave':
+        return this.triggerDeviceId() === this.selfId();
+    }
+  });
 
   /** Slave only: fires with this device's own clock timestamp (and the original master timestamp) when the master triggers. */
   readonly localTrigger$ = new Subject<{ localTs: number; masterTs: number }>();
   /** Master only: fires as each slave's clip arrives. */
   readonly clipReceived$ = new Subject<IncomingClip>();
+  /** Master only: fires when the assigned trigger device is a slave reporting a detected release. */
+  readonly remoteTriggerRequested$ = new Subject<number>();
 
   private peer: Peer | null = null;
   private masterConn: DataConnection | null = null;
@@ -70,9 +95,15 @@ export class SessionService {
       const settings = this.settingsService.settings();
       if (this.role() !== 'master') return;
       const message: WelcomeMessage = { type: 'welcome', settings };
-      for (const conn of this.slaveConns.values()) {
-        if (conn.open) conn.send(message);
-      }
+      this.sendToAllSlaves(message);
+    });
+
+    // Keeps every slave informed of which device is currently assigned to detect the release.
+    effect(() => {
+      const triggerDeviceId = this.triggerDeviceId();
+      if (this.role() !== 'master') return;
+      const message: TriggerAssignmentMessage = { type: 'trigger-assignment', triggerDeviceId };
+      this.sendToAllSlaves(message);
     });
   }
 
@@ -86,7 +117,8 @@ export class SessionService {
       const peer = new Peer(`${ROOM_ID_PREFIX}${code}`);
       this.peer = peer;
 
-      peer.on('open', () => {
+      peer.on('open', (id) => {
+        this.selfId.set(id);
         this.roomCode.set(code);
         this.connectionState.set('connected');
         resolve(code);
@@ -110,7 +142,8 @@ export class SessionService {
       const peer = new Peer();
       this.peer = peer;
 
-      peer.on('open', () => {
+      peer.on('open', (id) => {
+        this.selfId.set(id);
         const conn = peer.connect(`${ROOM_ID_PREFIX}${code}`, { reliable: true });
         this.masterConn = conn;
 
@@ -147,12 +180,27 @@ export class SessionService {
     this.connectedSlaves.set([]);
   }
 
-  /** Master only: broadcast a trigger (alongside extracting your own local clip). */
+  /** Master only: assign which device's microphone should detect the release. */
+  setTriggerDevice(deviceId: string): void {
+    this.triggerDeviceId.set(deviceId);
+  }
+
+  /** Master only: toggle whether the master device itself captures a video clip. */
+  setMasterRecordsVideo(recordsVideo: boolean): void {
+    this.masterRecordsVideo.set(recordsVideo);
+  }
+
+  /** Master only: broadcast a trigger (alongside extracting your own local clip, if recording). */
   broadcastTrigger(masterTs: number): void {
     const message: TriggerMessage = { type: 'trigger', masterTs };
-    for (const conn of this.slaveConns.values()) {
-      if (conn.open) conn.send(message);
-    }
+    this.sendToAllSlaves(message);
+  }
+
+  /** Slave only, when assigned as the trigger device: tell master a release was just detected/requested. */
+  reportLocalTrigger(localTs: number): void {
+    if (!this.masterConn?.open) return;
+    const message: RemoteTriggerMessage = { type: 'remote-trigger', estimatedMasterTs: localTs + this.clockOffsetMs };
+    this.masterConn.send(message);
   }
 
   /** Slave only: send this device's clip back to master for a given trigger. */
@@ -202,12 +250,20 @@ export class SessionService {
     });
   }
 
+  private sendToAllSlaves(message: SessionMessage): void {
+    for (const conn of this.slaveConns.values()) {
+      if (conn.open) conn.send(message);
+    }
+  }
+
   private acceptSlaveConnection(conn: DataConnection): void {
     conn.on('open', () => {
       this.slaveConns.set(conn.peer, conn);
       this.connectedSlaves.set([...this.connectedSlaves(), { id: conn.peer, connectedAt: Date.now() }]);
       const welcome: WelcomeMessage = { type: 'welcome', settings: this.settingsService.settings() };
       conn.send(welcome);
+      const assignment: TriggerAssignmentMessage = { type: 'trigger-assignment', triggerDeviceId: this.triggerDeviceId() };
+      conn.send(assignment);
     });
     conn.on('data', (data) => this.handleMasterIncomingData(conn, data));
     conn.on('close', () => this.removeSlave(conn.peer));
@@ -218,6 +274,10 @@ export class SessionService {
     this.slaveConns.delete(id);
     this.pendingClipMeta.delete(id);
     this.connectedSlaves.set(this.connectedSlaves().filter((s) => s.id !== id));
+    // The assigned trigger device just left - fall back to the master so the session stays usable.
+    if (this.triggerDeviceId() === id) {
+      this.triggerDeviceId.set(MASTER_TRIGGER_ID);
+    }
   }
 
   private handleMasterIncomingData(conn: DataConnection, data: unknown): void {
@@ -248,6 +308,8 @@ export class SessionService {
       conn.send(pong);
     } else if (data.type === 'clip-meta') {
       this.pendingClipMeta.set(conn.peer, { mimeType: data.mimeType, triggerMasterTs: data.triggerMasterTs });
+    } else if (data.type === 'remote-trigger') {
+      this.remoteTriggerRequested$.next(data.estimatedMasterTs);
     }
   }
 
@@ -257,6 +319,9 @@ export class SessionService {
     switch (data.type) {
       case 'welcome':
         this.settingsService.update(data.settings);
+        break;
+      case 'trigger-assignment':
+        this.triggerDeviceId.set(data.triggerDeviceId);
         break;
       case 'sync-pong':
         this.applySyncSample(data);
@@ -320,5 +385,8 @@ export class SessionService {
     this.clockOffsetMs = 0;
     this.isSynced.set(false);
     this.collectionProgress.set(null);
+    this.selfId.set(null);
+    this.triggerDeviceId.set(MASTER_TRIGGER_ID);
+    this.masterRecordsVideo.set(true);
   }
 }
