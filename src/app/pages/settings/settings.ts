@@ -2,6 +2,7 @@ import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { SettingsService } from '../../services/settings.service';
 import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
+import { APP_VERSION } from '../../version';
 
 @Component({
   selector: 'app-settings',
@@ -13,6 +14,8 @@ export class Settings implements OnInit {
   protected readonly settingsService = inject(SettingsService);
   protected readonly soundTrigger = inject(SoundTriggerService);
   private readonly destroyRef = inject(DestroyRef);
+
+  protected readonly appVersion = APP_VERSION;
 
   protected readonly micError = signal<string | null>(null);
   protected readonly meterScale = METER_DISPLAY_SCALE;

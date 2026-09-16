@@ -27,6 +27,17 @@ jobs:
 
       - run: npm ci
 
+      - name: Stamp build version
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          BUILT_AT=$(date -u +"%Y-%m-%d %H:%M UTC")
+          cat > src/app/version.ts <<EOF
+          export const APP_VERSION = {
+            sha: '${SHA}',
+            builtAt: '${BUILT_AT}',
+          };
+          EOF
+
       - run: npx ng build --configuration production --base-href /ArcherFormReplay/
 
       - run: cp dist/ArcherFormReplay/browser/index.html dist/ArcherFormReplay/browser/404.html
