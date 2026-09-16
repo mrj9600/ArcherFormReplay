@@ -1,2 +1,50 @@
-<h2>Settings</h2>
-<p>Pre-roll, post-roll and mic sensitivity settings will live here (phase 2).</p>
+<div class="settings-page">
+  <div class="setting">
+    <label for="preRoll">
+      <mat-icon>history</mat-icon>
+      Pre-roll: {{ settingsService.settings().preRollSeconds }}s before release
+    </label>
+    <input
+      id="preRoll"
+      type="range"
+      min="0.5"
+      max="10"
+      step="0.5"
+      [value]="settingsService.settings().preRollSeconds"
+      (input)="onPreRollInput($event)"
+    />
+  </div>
+
+  <div class="setting">
+    <label for="postRoll">
+      <mat-icon>update</mat-icon>
+      Post-roll: {{ settingsService.settings().postRollSeconds }}s after release
+    </label>
+    <input
+      id="postRoll"
+      type="range"
+      min="0.5"
+      max="10"
+      step="0.5"
+      [value]="settingsService.settings().postRollSeconds"
+      (input)="onPostRollInput($event)"
+    />
+  </div>
+
+  <div class="setting">
+    <label for="sensitivity">
+      <mat-icon>graphic_eq</mat-icon>
+      Mic sensitivity threshold: {{ settingsService.settings().micSensitivity }}
+    </label>
+    <input
+      id="sensitivity"
+      type="range"
+      min="0.02"
+      max="0.6"
+      step="0.01"
+      [value]="settingsService.settings().micSensitivity"
+      (input)="onSensitivityInput($event)"
+    />
+    <p class="hint">Lower = more sensitive (triggers on quieter sounds). Adjust while watching the mic level meter on the Record page.</p>
+  </div>
+</div>

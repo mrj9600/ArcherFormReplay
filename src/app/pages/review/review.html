@@ -1,2 +1,26 @@
-<h2>Review</h2>
-<p>Clip playback with variable speed will live here (phase 2).</p>
+<div class="review-page">
+  @if (clipStore.clip(); as clip) {
+    <video #player [src]="clip.url" controls playsinline class="player"></video>
+
+    <div class="rate-control">
+      <label for="rate">
+        <mat-icon>speed</mat-icon>
+        Playback speed: {{ playbackRate() }}x
+      </label>
+      <input
+        id="rate"
+        type="range"
+        min="0.1"
+        max="1"
+        step="0.05"
+        [value]="playbackRate()"
+        (input)="onRateInput($event)"
+      />
+    </div>
+  } @else {
+    <div class="empty-state">
+      <mat-icon>movie</mat-icon>
+      <p>No clip yet — go to Record and trigger a shot.</p>
+    </div>
+  }
+</div>

@@ -1,2 +1,39 @@
-<h2>Record</h2>
-<p>Camera preview and sound-triggered capture will live here (phase 2).</p>
+<div class="record-page">
+  @if (status() === 'error') {
+    <div class="error-panel">
+      <mat-icon>videocam_off</mat-icon>
+      <p>Couldn't access the camera or microphone. Check permissions and reload.</p>
+      @if (camera.error()) {
+        <p class="error-detail">{{ camera.error() }}</p>
+      }
+    </div>
+  } @else {
+    <div class="preview-wrap">
+      <video #preview autoplay playsinline muted class="preview"></video>
+
+      <mat-chip-set class="status-chip">
+        @switch (status()) {
+          @case ('starting') {
+            <mat-chip>Starting…</mat-chip>
+          }
+          @case ('listening') {
+            <mat-chip color="primary" highlighted>Listening for release</mat-chip>
+          }
+          @case ('capturing') {
+            <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>
+          }
+        }
+      </mat-chip-set>
+    </div>
+
+    <div class="level-meter">
+      <span>Mic level</span>
+      <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * 400 > 100 ? 100 : soundTrigger.level() * 400"></mat-progress-bar>
+    </div>
+
+    <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
+      <mat-icon>bolt</mat-icon>
+      Test trigger
+    </button>
+  }
+</div>
