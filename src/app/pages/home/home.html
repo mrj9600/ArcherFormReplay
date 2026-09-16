@@ -1,6 +1,5 @@
 <div class="home-page">
-  <h1>ArcherFormReplay</h1>
-  <p>Review your shot form on video, solo or synced across multiple devices on the same Wi-Fi or hotspot.</p>
+  <p class="tagline">Review your shot form on video, solo or synced across multiple devices on the same Wi-Fi or hotspot.</p>
 
   <ol class="steps">
     <li>Open <strong>Settings</strong> to set pre-roll/post-roll length and mic sensitivity.</li>
@@ -12,4 +11,16 @@
     <mat-icon>videocam</mat-icon>
     Start recording
   </a>
+
+  @if (installPrompt.canInstall()) {
+    <button mat-stroked-button (click)="install()">
+      <mat-icon>install_mobile</mat-icon>
+      Install app
+    </button>
+  } @else if (installPrompt.isIos() && !installPrompt.isStandalone()) {
+    <p class="install-hint">
+      <mat-icon>ios_share</mat-icon>
+      To install: tap Share, then "Add to Home Screen".
+    </p>
+  }
 </div>
