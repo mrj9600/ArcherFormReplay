@@ -12,6 +12,12 @@
   border-radius: 8px;
 }
 
+.autoplay-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.5);
+}
+
 .rate-control {
   display: flex;
   flex-direction: column;

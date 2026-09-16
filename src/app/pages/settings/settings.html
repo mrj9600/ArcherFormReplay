@@ -39,12 +39,32 @@
     <input
       id="sensitivity"
       type="range"
-      min="0.02"
-      max="0.6"
-      step="0.01"
+      min="0.01"
+      max="0.3"
+      step="0.005"
       [value]="settingsService.settings().micSensitivity"
       (input)="onSensitivityInput($event)"
     />
     <p class="hint">Lower = more sensitive (triggers on quieter sounds). Adjust while watching the mic level meter on the Record page.</p>
+  </div>
+
+  <div class="setting">
+    <label for="autoplay">
+      <mat-icon>play_circle</mat-icon>
+      @if (settingsService.settings().autoplayDelaySeconds > 0) {
+        Auto-play: {{ settingsService.settings().autoplayDelaySeconds }}s after clip is ready
+      } @else {
+        Auto-play: off (play manually)
+      }
+    </label>
+    <input
+      id="autoplay"
+      type="range"
+      min="0"
+      max="10"
+      step="0.5"
+      [value]="settingsService.settings().autoplayDelaySeconds"
+      (input)="onAutoplayDelayInput($event)"
+    />
   </div>
 </div>

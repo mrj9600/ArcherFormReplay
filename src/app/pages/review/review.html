@@ -2,6 +2,10 @@
   @if (clipStore.clip(); as clip) {
     <video #player [src]="clip.url" controls playsinline class="player"></video>
 
+    @if (settingsService.settings().autoplayDelaySeconds > 0) {
+      <p class="autoplay-hint">Auto-playing in {{ settingsService.settings().autoplayDelaySeconds }}s…</p>
+    }
+
     <div class="rate-control">
       <label for="rate">
         <mat-icon>speed</mat-icon>

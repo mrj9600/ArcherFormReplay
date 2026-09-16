@@ -6,13 +6,16 @@ export interface AppSettings {
   /** RMS amplitude (0-1) the mic must exceed to count as a release. */
   micSensitivity: number;
   chunkMs: number;
+  /** Seconds to wait after a clip is ready before playback starts automatically. 0 disables autoplay. */
+  autoplayDelaySeconds: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   preRollSeconds: 3,
   postRollSeconds: 2,
-  micSensitivity: 0.15,
+  micSensitivity: 0.05,
   chunkMs: 250,
+  autoplayDelaySeconds: 2,
 };
 
 const STORAGE_KEY = 'archer-form-replay.settings';

@@ -22,4 +22,8 @@ export class Settings {
   protected onSensitivityInput(event: Event): void {
     this.settingsService.update({ micSensitivity: Number((event.target as HTMLInputElement).value) });
   }
+
+  protected onAutoplayDelayInput(event: Event): void {
+    this.settingsService.update({ autoplayDelaySeconds: Number((event.target as HTMLInputElement).value) });
+  }
 }
