@@ -19,7 +19,7 @@ export class Review {
   protected readonly videoRefs = viewChildren<ElementRef<HTMLVideoElement>>('player');
   protected readonly playbackRate = signal(1);
   protected readonly isPlaying = signal(false);
-  /** True once every clip's real duration is known and per-clip rates have been computed - only then is autoplay/manual play allowed to start. */
+  /** True once every clip's real duration is known - only then is autoplay/manual play allowed to start. */
   protected readonly clipsReady = signal(false);
   protected readonly autoReturnCancelled = signal(false);
   protected readonly loopsCompleted = signal(0);
@@ -27,6 +27,7 @@ export class Review {
   /** Bumped for every new clip set so a slow in-flight prepare() for a stale set can detect it's obsolete and stop. */
   private generation = 0;
   private endedIndices = new Set<number>();
+  private pendingStartTimers: ReturnType<typeof setTimeout>[] = [];
 
   constructor() {
     effect(() => {
@@ -35,6 +36,7 @@ export class Review {
       if (!clipSet || videos.length === 0 || videos.length !== clipSet.clips.length) return;
 
       const generation = ++this.generation;
+      this.clearPendingStartTimers();
       this.clipsReady.set(false);
       this.isPlaying.set(false);
       this.autoReturnCancelled.set(false);
@@ -46,22 +48,44 @@ export class Review {
   protected onRateInput(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     this.playbackRate.set(value);
-    this.applySyncRates();
+    this.applyRates();
   }
 
   protected playAll(): void {
     if (!this.clipsReady()) return;
-    this.applySyncRates();
+    this.clearPendingStartTimers();
+    this.applyRates();
     this.isPlaying.set(true);
-    for (const ref of this.videoRefs()) void ref.nativeElement.play();
+
+    const videos = this.videoRefs().map((ref) => ref.nativeElement);
+    const rate = this.playbackRate();
+    const sync = this.settingsService.settings().syncClipEnds;
+    if (!sync || videos.length <= 1) {
+      for (const video of videos) void video.play();
+      return;
+    }
+
+    const durations = videos.map((v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 0));
+    const maxDuration = Math.max(...durations, 0);
+    videos.forEach((video, i) => {
+      const duration = durations[i] || maxDuration;
+      const delayMs = maxDuration > 0 ? ((maxDuration - duration) / rate) * 1000 : 0;
+      if (delayMs <= 0) {
+        void video.play();
+      } else {
+        this.pendingStartTimers.push(setTimeout(() => void video.play(), delayMs));
+      }
+    });
   }
 
   protected pauseAll(): void {
+    this.clearPendingStartTimers();
     this.isPlaying.set(false);
     for (const ref of this.videoRefs()) ref.nativeElement.pause();
   }
 
   protected restartAll(): void {
+    this.clearPendingStartTimers();
     for (const ref of this.videoRefs()) ref.nativeElement.currentTime = 0;
     this.playAll();
   }
@@ -89,7 +113,7 @@ export class Review {
     await Promise.all(videos.map((video) => this.waitForDuration(video)));
     if (generation !== this.generation) return; // a newer clip set has since arrived
 
-    this.applySyncRates();
+    this.applyRates();
     this.setupEndedListeners(generation);
     this.clipsReady.set(true);
 
@@ -138,24 +162,14 @@ export class Review {
     });
   }
 
-  /** When sync is enabled, slows shorter clips down (relative to the base speed) so every clip's
-   *  wall-clock playback time matches the longest one - they start together and end together. */
-  private applySyncRates(): void {
-    const videos = this.videoRefs().map((ref) => ref.nativeElement);
-    const base = this.playbackRate();
-    const sync = this.settingsService.settings().syncClipEnds;
+  private applyRates(): void {
+    const rate = this.playbackRate();
+    for (const ref of this.videoRefs()) ref.nativeElement.playbackRate = rate;
+  }
 
-    if (!sync || videos.length <= 1) {
-      for (const video of videos) video.playbackRate = base;
-      return;
-    }
-
-    const durations = videos.map((v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 0));
-    const maxDuration = Math.max(...durations, 0);
-    videos.forEach((video, i) => {
-      const duration = durations[i] || maxDuration;
-      video.playbackRate = maxDuration > 0 ? (duration / maxDuration) * base : base;
-    });
+  private clearPendingStartTimers(): void {
+    for (const timer of this.pendingStartTimers) clearTimeout(timer);
+    this.pendingStartTimers = [];
   }
 
   private setupEndedListeners(generation: number): void {
