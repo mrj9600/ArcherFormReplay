@@ -44,6 +44,10 @@ export class App {
   }
 
   protected reloadForUpdate(): void {
-    document.location.reload();
+    // Without this, the reload races against the new service worker's activation: it can stay
+    // "waiting" (the old one still controlling this page) through the reload, so the page comes
+    // back with a mismatched mix of old and new cached assets - e.g. new index.html/CSS paired
+    // with the old compiled JS bundle - instead of a clean, fully-new version.
+    void this.swUpdate.activateUpdate().finally(() => document.location.reload());
   }
 }
