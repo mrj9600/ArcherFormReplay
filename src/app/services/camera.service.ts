@@ -1,6 +1,8 @@
 import { Injectable, signal } from '@angular/core';
 
-const PREFERRED_DEVICE_KEY = 'archer-form-replay.cameraDeviceId';
+export type CameraPreference = { mode: 'default' } | { mode: 'front' } | { mode: 'device'; deviceId: string };
+
+const PREFERENCE_KEY = 'archer-form-replay.cameraPreference';
 
 @Injectable({ providedIn: 'root' })
 export class CameraService {
@@ -8,16 +10,12 @@ export class CameraService {
   readonly devices = signal<MediaDeviceInfo[]>([]);
   readonly error = signal<string | null>(null);
   /** The user's chosen camera for this device (local hardware choice - never synced between devices in a session). */
-  readonly preferredDeviceId = signal<string | null>(this.loadPreferredDeviceId());
+  readonly preference = signal<CameraPreference>(this.loadPreference());
 
-  setPreferredDevice(deviceId: string | null): void {
-    this.preferredDeviceId.set(deviceId);
+  setPreference(preference: CameraPreference): void {
+    this.preference.set(preference);
     try {
-      if (deviceId) {
-        localStorage.setItem(PREFERRED_DEVICE_KEY, deviceId);
-      } else {
-        localStorage.removeItem(PREFERRED_DEVICE_KEY);
-      }
+      localStorage.setItem(PREFERENCE_KEY, JSON.stringify(preference));
     } catch {
       // localStorage unavailable - the choice just won't persist across reloads.
     }
@@ -47,15 +45,15 @@ export class CameraService {
   /** Opens a video stream, with audio only when requested (master needs it for release detection; slaves don't). */
   async start(deviceId?: string, withAudio = true): Promise<MediaStream> {
     this.stop();
-    const targetDeviceId = deviceId ?? this.preferredDeviceId() ?? undefined;
+    const target: CameraPreference = deviceId ? { mode: 'device', deviceId } : this.preference();
     try {
-      return await this.open(targetDeviceId, withAudio);
+      return await this.open(target, withAudio);
     } catch (err) {
       // The preferred camera may no longer exist (unplugged, etc.) - fall back to the default
       // camera rather than failing outright.
-      if (targetDeviceId) {
+      if (target.mode !== 'default') {
         try {
-          return await this.open(undefined, withAudio);
+          return await this.open({ mode: 'default' }, withAudio);
         } catch {
           // fall through to the original error below
         }
@@ -71,8 +69,11 @@ export class CameraService {
     this.stream.set(null);
   }
 
-  private async open(deviceId: string | undefined, withAudio: boolean): Promise<MediaStream> {
-    const video: MediaTrackConstraints = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' };
+  private async open(preference: CameraPreference, withAudio: boolean): Promise<MediaStream> {
+    const video: MediaTrackConstraints =
+      preference.mode === 'device'
+        ? { deviceId: { exact: preference.deviceId } }
+        : { facingMode: preference.mode === 'front' ? 'user' : 'environment' };
     const stream = await navigator.mediaDevices.getUserMedia({ video, audio: withAudio });
     this.stream.set(stream);
     this.error.set(null);
@@ -80,11 +81,18 @@ export class CameraService {
     return stream;
   }
 
-  private loadPreferredDeviceId(): string | null {
+  private loadPreference(): CameraPreference {
     try {
-      return localStorage.getItem(PREFERRED_DEVICE_KEY);
+      const raw = localStorage.getItem(PREFERENCE_KEY);
+      if (!raw) return { mode: 'default' };
+      const parsed = JSON.parse(raw) as Partial<CameraPreference>;
+      if (parsed?.mode === 'front' || parsed?.mode === 'default') return { mode: parsed.mode };
+      if (parsed?.mode === 'device' && typeof (parsed as { deviceId?: unknown }).deviceId === 'string') {
+        return { mode: 'device', deviceId: (parsed as { deviceId: string }).deviceId };
+      }
+      return { mode: 'default' };
     } catch {
-      return null;
+      return { mode: 'default' };
     }
   }
 }

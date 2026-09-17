@@ -5,6 +5,8 @@ import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-t
 import { CameraService } from '../../services/camera.service';
 import { APP_VERSION } from '../../version';
 
+const FRONT_OPTION_VALUE = '__front__';
+
 @Component({
   selector: 'app-settings',
   imports: [MatIconModule],
@@ -23,6 +25,7 @@ export class Settings implements OnInit {
   protected readonly meterScale = METER_DISPLAY_SCALE;
 
   protected readonly cameraSelectRef = viewChild<ElementRef<HTMLSelectElement>>('cameraSelect');
+  protected readonly frontOptionValue = FRONT_OPTION_VALUE;
 
   private micStream: MediaStream | null = null;
 
@@ -40,10 +43,9 @@ export class Settings implements OnInit {
     effect(() => {
       const select = this.cameraSelectRef()?.nativeElement;
       const devices = this.camera.devices();
-      const preferred = this.camera.preferredDeviceId() ?? '';
-      if (select && devices) {
-        select.value = preferred;
-      }
+      const preference = this.camera.preference();
+      if (!select || !devices) return;
+      select.value = preference.mode === 'device' ? preference.deviceId : preference.mode === 'front' ? FRONT_OPTION_VALUE : '';
     });
   }
 
@@ -59,7 +61,20 @@ export class Settings implements OnInit {
 
   protected onCameraChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
-    this.camera.setPreferredDevice(value || null);
+    if (value === '') {
+      this.camera.setPreference({ mode: 'default' });
+    } else if (value === FRONT_OPTION_VALUE) {
+      this.camera.setPreference({ mode: 'front' });
+    } else {
+      this.camera.setPreference({ mode: 'device', deviceId: value });
+    }
+  }
+
+  /** The OS-reported label (e.g. "camera2 1, facing back") is often unreliable about facing, and
+   *  is redundant with the dedicated Default/Front-facing options above - so it's stripped here. */
+  protected cameraLabel(device: MediaDeviceInfo, index: number): string {
+    const cleaned = device.label.replace(/,?\s*facing\s+(front|back)\s*$/i, '').trim();
+    return cleaned || `Camera ${index + 1}`;
   }
 
   protected onPreRollInput(event: Event): void {

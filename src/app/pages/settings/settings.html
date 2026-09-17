@@ -7,11 +7,19 @@
       </label>
       <select id="camera" #cameraSelect (change)="onCameraChange($event)">
         <option value="">Default (rear-facing)</option>
-        @for (device of camera.devices(); track device.deviceId) {
-          <option [value]="device.deviceId">{{ device.label || 'Camera ' + device.deviceId.slice(-4) }}</option>
+        <option [value]="frontOptionValue">Front-facing</option>
+        @if (camera.devices().length > 1) {
+          <optgroup label="Specific camera">
+            @for (device of camera.devices(); track device.deviceId; let i = $index) {
+              <option [value]="device.deviceId">{{ cameraLabel(device, i) }}</option>
+            }
+          </optgroup>
         }
       </select>
-      <p class="hint">Applies next time Record opens.</p>
+      <p class="hint">
+        Applies next time Record opens. "Specific camera" is only needed if Default/Front-facing
+        don't pick the right one — e.g. an external camera on a computer.
+      </p>
     </div>
   }
 
