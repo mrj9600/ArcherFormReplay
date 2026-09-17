@@ -81,7 +81,7 @@
           <p class="error">{{ session.error() }}</p>
         }
 
-        <button mat-stroked-button (click)="leave()">Leave session</button>
+        <button mat-stroked-button [disabled]="busy()" (click)="stopSession()">Stop session</button>
       </div>
     }
 

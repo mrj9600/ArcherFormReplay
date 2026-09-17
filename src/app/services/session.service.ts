@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
+import { Router } from '@angular/router';
 import Peer, { DataConnection } from 'peerjs';
 import { SettingsService } from './settings.service';
 import {
@@ -7,6 +8,7 @@ import {
   MASTER_TRIGGER_ID,
   ROOM_ID_PREFIX,
   RemoteTriggerMessage,
+  SessionEndedMessage,
   SessionMessage,
   SyncPingMessage,
   SyncPongMessage,
@@ -51,6 +53,7 @@ const MAX_ROOM_CODE_ATTEMPTS = 5;
 @Injectable({ providedIn: 'root' })
 export class SessionService {
   private readonly settingsService = inject(SettingsService);
+  private readonly router = inject(Router);
 
   readonly role = signal<SessionRole>('none');
   readonly roomCode = signal<string | null>(null);
@@ -199,6 +202,19 @@ export class SessionService {
     this.connectedSlaves.set([]);
   }
 
+  /** Master only: tells every connected slave the session is ending before tearing down locally
+   *  - otherwise a slave would be left sitting on Record/Review waiting for a master that's gone. */
+  async stopSession(): Promise<void> {
+    if (this.role() === 'master') {
+      const message: SessionEndedMessage = { type: 'session-ended' };
+      this.sendToAllSlaves(message);
+      // Give the data channel a moment to actually flush the message before the connections
+      // it's flowing over get torn down.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    this.leaveSession();
+  }
+
   /** Master only: assign which device's microphone should detect the release. */
   setTriggerDevice(deviceId: string): void {
     this.triggerDeviceId.set(deviceId);
@@ -337,6 +353,10 @@ export class SessionService {
         this.localTrigger$.next({ localTs, masterTs: data.masterTs, triggerSeq: data.triggerSeq });
         break;
       }
+      case 'session-ended':
+        this.leaveSession();
+        void this.router.navigate(['/session']);
+        break;
     }
   }
 

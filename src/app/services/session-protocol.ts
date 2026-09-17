@@ -49,6 +49,11 @@ export interface RemoteTriggerMessage {
   estimatedMasterTs: number;
 }
 
+/** Master -> slaves: the master stopped the session - every slave should leave too. */
+export interface SessionEndedMessage {
+  type: 'session-ended';
+}
+
 export type SessionMessage =
   | WelcomeMessage
   | TriggerMessage
@@ -56,7 +61,8 @@ export type SessionMessage =
   | SyncPongMessage
   | ClipMessage
   | TriggerAssignmentMessage
-  | RemoteTriggerMessage;
+  | RemoteTriggerMessage
+  | SessionEndedMessage;
 
 /** Sentinel triggerDeviceId meaning "the master itself", since the master has no PeerJS id from its own perspective worth tracking separately. */
 export const MASTER_TRIGGER_ID = '__master__';

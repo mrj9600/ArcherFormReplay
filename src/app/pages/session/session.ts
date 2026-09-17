@@ -62,4 +62,15 @@ export class Session {
     this.session.leaveSession();
     this.joinCode.set('');
   }
+
+  /** Master only: stops the session for everyone, not just this device (see leave()). */
+  protected async stopSession(): Promise<void> {
+    this.busy.set(true);
+    try {
+      await this.session.stopSession();
+    } finally {
+      this.joinCode.set('');
+      this.busy.set(false);
+    }
+  }
 }
