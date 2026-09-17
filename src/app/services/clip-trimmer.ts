@@ -2,9 +2,9 @@ import { BlobSource, BufferTarget, Conversion, Input, MP4, Mp4OutputFormat, Outp
 
 /**
  * Trims a video Blob down to an exact [startSec, endSec) window via mediabunny (WebCodecs-based
- * decode/encode). The rolling buffer can only ever hand back "everything since the segment
- * started" without corrupting the recording (see rolling-buffer-recorder.service.ts), so this is
- * what turns that into a clip whose length actually matches the configured pre-roll/post-roll.
+ * decode/encode). The rolling buffer hands back the entire recording so far (see
+ * rolling-buffer-recorder.service.ts), so this is what turns that into a clip whose length
+ * actually matches the configured pre-roll/post-roll.
  */
 export async function trimClip(blob: Blob, startSec: number, endSec: number, mimeType: string): Promise<Blob> {
   const input = new Input({ formats: [WEBM, MP4], source: new BlobSource(blob) });
