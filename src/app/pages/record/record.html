@@ -40,6 +40,9 @@
         @case ('coordinating') {
           <mat-chip color="primary" highlighted>Coordinating session</mat-chip>
         }
+        @case ('manual-only') {
+          <mat-chip>No camera/mic on this device — use manual trigger</mat-chip>
+        }
         @case ('capturing') {
           @if (session.role() === 'master' && collectionDisplay(); as progress) {
             <mat-chip color="accent" highlighted>Collecting clips… ({{ progress.received }}/{{ progress.expected }})</mat-chip>
@@ -50,7 +53,7 @@
       }
     </ng-template>
 
-    @if (session.isTriggerDevice()) {
+    @if (session.isTriggerDevice() && !micUnavailable()) {
       <div class="level-meter">
         <span>Mic level</span>
         <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>

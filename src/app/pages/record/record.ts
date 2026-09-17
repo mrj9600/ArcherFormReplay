@@ -13,7 +13,7 @@ import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
 import { SessionService } from '../../services/session.service';
 
-type RecordStatus = 'listening' | 'waiting-for-master' | 'coordinating' | 'capturing' | 'error';
+type RecordStatus = 'listening' | 'waiting-for-master' | 'coordinating' | 'manual-only' | 'capturing' | 'error';
 
 @Component({
   selector: 'app-record',
@@ -30,6 +30,13 @@ export class Record implements OnInit {
   private readonly clipStore = inject(ClipStoreService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+
+  /** True once mic-based release detection has been tried and failed for this trigger device -
+   *  distinct from the fatal 'error' status: a device with no camera/mic can still coordinate
+   *  and be triggered manually, so this degrades the status text instead of blocking the page.
+   *  Declared before `status` below since its initializer calls computeIdleStatus(), which reads
+   *  this - class fields initialize in declaration order. */
+  protected readonly micUnavailable = signal(false);
 
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
   protected readonly status = signal<RecordStatus>(this.computeIdleStatus());
@@ -79,6 +86,7 @@ export class Record implements OnInit {
           this.micOnlyStream.getTracks().forEach((track) => track.stop());
           this.micOnlyStream = null;
         }
+        this.micUnavailable.set(false);
         this.syncIdleStatus();
         return;
       }
@@ -86,6 +94,7 @@ export class Record implements OnInit {
       const cameraStream = this.camera.stream();
       if (this.recordsVideo() && cameraStream && cameraStream.getAudioTracks().length > 0) {
         this.soundTrigger.start(cameraStream, this.settings.settings().micSensitivity);
+        this.micUnavailable.set(false);
         this.syncIdleStatus();
       } else if (!this.micOnlyStream && !this.acquiringMic) {
         this.acquiringMic = true;
@@ -94,9 +103,15 @@ export class Record implements OnInit {
           .then((stream) => {
             this.micOnlyStream = stream;
             this.soundTrigger.start(stream, this.settings.settings().micSensitivity);
+            this.micUnavailable.set(false);
             this.syncIdleStatus();
           })
-          .catch(() => this.status.set('error'))
+          .catch(() => {
+            // No mic available either - not fatal, this device just can't self-detect a release.
+            // It can still coordinate/be triggered manually (see showTestButton/testTrigger).
+            this.micUnavailable.set(true);
+            this.syncIdleStatus();
+          })
           .finally(() => {
             this.acquiringMic = false;
           });
@@ -124,8 +139,16 @@ export class Record implements OnInit {
         // losing its history), so a later trigger-device reassignment only affects live
         // detection (handled reactively above), not whether the recorded clip itself has sound.
         const withAudio = this.session.isTriggerDevice();
-        const stream = await this.camera.start(undefined, withAudio);
-        this.buffer.start(stream);
+        try {
+          const stream = await this.camera.start(undefined, withAudio);
+          this.buffer.start(stream);
+        } catch (err) {
+          // A slave's whole purpose is contributing a camera angle - no camera is fatal there.
+          // The master (or a solo device) can still coordinate/be triggered manually without
+          // recording its own video, so fall back to that instead of hard-failing the page.
+          if (isSlave) throw err;
+          this.recordsVideo.set(false);
+        }
       }
 
       if (isSlave) {
@@ -180,6 +203,7 @@ export class Record implements OnInit {
   private computeIdleStatus(): RecordStatus {
     const isSlave = this.session.role() === 'slave';
     const isTrigger = this.session.isTriggerDevice();
+    if (isTrigger && this.micUnavailable()) return 'manual-only';
     if (isSlave) return isTrigger ? 'listening' : 'waiting-for-master';
     return isTrigger ? 'listening' : 'coordinating';
   }
