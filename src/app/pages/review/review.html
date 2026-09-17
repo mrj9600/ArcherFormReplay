@@ -74,6 +74,12 @@
           <mat-icon>replay</mat-icon>
           Restart
         </button>
+        @if (clipSet.clips.length > 1) {
+          <button mat-stroked-button (click)="downloadAll()">
+            <mat-icon>download</mat-icon>
+            Download all
+          </button>
+        }
       </div>
 
       <div class="rate-control">

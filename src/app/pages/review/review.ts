@@ -108,6 +108,23 @@ export class Review {
     return `archer-form-replay-${safeLabel}.${ext}`;
   }
 
+  /** Downloads every clip in the current set. Staggered slightly - firing several downloads
+   *  from a single click in the same tick makes some browsers silently drop all but the first. */
+  protected downloadAll(): void {
+    const clipSet = this.clipStore.clipSet();
+    if (!clipSet) return;
+    clipSet.clips.forEach((clip, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = clip.url;
+        a.download = this.downloadFilename(clip, i);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }, i * 200);
+    });
+  }
+
   private async prepare(generation: number): Promise<void> {
     const videos = this.videoRefs().map((ref) => ref.nativeElement);
     await Promise.all(videos.map((video) => this.waitForDuration(video)));
