@@ -95,6 +95,14 @@ export class Settings implements OnInit {
     this.settingsService.update({ autoplayDelaySeconds: Number((event.target as HTMLInputElement).value) });
   }
 
+  protected onSyncClipEndsChange(event: Event): void {
+    this.settingsService.update({ syncClipEnds: (event.target as HTMLInputElement).checked });
+  }
+
+  protected onAutoReturnLoopsInput(event: Event): void {
+    this.settingsService.update({ autoReturnLoops: Number((event.target as HTMLInputElement).value) });
+  }
+
   protected meterPercent(): number {
     const pct = this.soundTrigger.level() * this.meterScale;
     return pct > 100 ? 100 : pct;

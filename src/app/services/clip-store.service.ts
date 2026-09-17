@@ -3,6 +3,7 @@ import { Injectable, signal } from '@angular/core';
 export interface StoredClip {
   deviceLabel: string;
   url: string;
+  mimeType: string;
 }
 
 export interface ClipSet {
@@ -24,7 +25,11 @@ export class ClipStoreService {
 
   setClips(items: { deviceLabel: string; blob: Blob }[], note?: string): void {
     this.revokeAll();
-    const clips = items.map((item) => ({ deviceLabel: item.deviceLabel, url: URL.createObjectURL(item.blob) }));
+    const clips = items.map((item) => ({
+      deviceLabel: item.deviceLabel,
+      url: URL.createObjectURL(item.blob),
+      mimeType: item.blob.type || 'video/webm',
+    }));
     this.objectUrls = clips.map((c) => c.url);
     this.clipSet.set({ capturedAt: Date.now(), clips, note });
   }

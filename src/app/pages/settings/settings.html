@@ -101,6 +101,37 @@
       [value]="settingsService.settings().autoplayDelaySeconds"
       (input)="onAutoplayDelayInput($event)"
     />
+    <p class="hint">Only starts once every camera's clip has arrived (or the wait has timed out).</p>
+  </div>
+
+  <div class="setting">
+    <label class="toggle-row">
+      <input type="checkbox" [checked]="settingsService.settings().syncClipEnds" (change)="onSyncClipEndsChange($event)" />
+      <mat-icon>sync</mat-icon>
+      Sync multi-camera playback to end together
+    </label>
+    <p class="hint">When clips differ in length, slows the shorter ones down so every camera angle finishes at the same moment.</p>
+  </div>
+
+  <div class="setting">
+    <label for="autoReturn">
+      <mat-icon>replay</mat-icon>
+      @if (settingsService.settings().autoReturnLoops > 0) {
+        Auto-return to Record after playing {{ settingsService.settings().autoReturnLoops }}x
+      } @else {
+        Auto-return to Record: off (review manually)
+      }
+    </label>
+    <input
+      id="autoReturn"
+      type="range"
+      min="0"
+      max="5"
+      step="1"
+      [value]="settingsService.settings().autoReturnLoops"
+      (input)="onAutoReturnLoopsInput($event)"
+    />
+    <p class="hint">Can always be cancelled from the Review page once it's counting down.</p>
   </div>
 
   <p class="version">Version {{ appVersion.sha }} · built {{ appVersion.builtAt }}</p>

@@ -5,8 +5,12 @@ export interface AppSettings {
   postRollSeconds: number;
   /** Peak amplitude (0-1) the mic must exceed to count as a release. */
   micSensitivity: number;
-  /** Seconds to wait after a clip is ready before playback starts automatically. 0 disables autoplay. */
+  /** Seconds to wait after all clips are ready (or the collection has timed out) before playback starts automatically. 0 disables autoplay. */
   autoplayDelaySeconds: number;
+  /** When multiple clips have different lengths, slow the shorter ones down so every clip ends at the same time. */
+  syncClipEnds: boolean;
+  /** How many times to auto-play the review before returning to Record. 0 disables auto-return. */
+  autoReturnLoops: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -14,6 +18,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   postRollSeconds: 2,
   micSensitivity: 0.04,
   autoplayDelaySeconds: 2,
+  syncClipEnds: true,
+  autoReturnLoops: 0,
 };
 
 const STORAGE_KEY = 'archer-form-replay.settings';

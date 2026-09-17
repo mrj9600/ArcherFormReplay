@@ -5,45 +5,72 @@
     }
 
     <div class="clip-grid" [style.--clip-count]="clipSet.clips.length">
-      @for (clip of clipSet.clips; track clip.url) {
+      @for (clip of clipSet.clips; track clip.url; let i = $index) {
         <div class="clip-tile">
-          <span class="clip-label">{{ clip.deviceLabel }}</span>
-          <video #player [src]="clip.url" controls playsinline class="player"></video>
+          <div class="clip-tile-header">
+            <span class="clip-label">{{ clip.deviceLabel }}</span>
+            <a
+              class="download-link"
+              [href]="clip.url"
+              [download]="downloadFilename(clip, i)"
+              title="Download this clip"
+            >
+              <mat-icon>download</mat-icon>
+            </a>
+          </div>
+          <video #player [src]="clip.url" playsinline class="player"></video>
         </div>
       }
     </div>
 
-    @if (settingsService.settings().autoplayDelaySeconds > 0) {
-      <p class="autoplay-hint">Auto-playing in {{ settingsService.settings().autoplayDelaySeconds }}s…</p>
+    @if (!clipsReady()) {
+      <p class="hint">Preparing clip{{ clipSet.clips.length > 1 ? 's' : '' }}…</p>
+    } @else if (settingsService.settings().autoplayDelaySeconds > 0 && loopsCompleted() === 0 && !isPlaying()) {
+      <p class="hint">Auto-playing in {{ settingsService.settings().autoplayDelaySeconds }}s…</p>
     }
 
-    @if (clipSet.clips.length > 1) {
-      <div class="bulk-controls">
-        <button mat-stroked-button (click)="playAll()">
-          <mat-icon>play_arrow</mat-icon>
-          Play all
-        </button>
-        <button mat-stroked-button (click)="pauseAll()">
-          <mat-icon>pause</mat-icon>
-          Pause all
-        </button>
+    @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
+      <div class="auto-return-banner">
+        <mat-icon>replay</mat-icon>
+        <span>Returning to Record after play {{ loopsCompleted() + 1 }} of {{ loopsConfigured() }}</span>
+        <button mat-button (click)="cancelAutoReturn()">Cancel</button>
       </div>
     }
 
-    <div class="rate-control">
-      <label for="rate">
-        <mat-icon>speed</mat-icon>
-        Playback speed: {{ playbackRate() }}x
-      </label>
-      <input
-        id="rate"
-        type="range"
-        min="0.1"
-        max="1"
-        step="0.05"
-        [value]="playbackRate()"
-        (input)="onRateInput($event)"
-      />
+    <div class="controls" [class.disabled]="!clipsReady()">
+      <div class="playback-controls">
+        @if (isPlaying()) {
+          <button mat-stroked-button (click)="pauseAll()" [disabled]="!clipsReady()">
+            <mat-icon>pause</mat-icon>
+            Pause
+          </button>
+        } @else {
+          <button mat-flat-button color="primary" (click)="playAll()" [disabled]="!clipsReady()">
+            <mat-icon>play_arrow</mat-icon>
+            Play
+          </button>
+        }
+        <button mat-stroked-button (click)="restartAll()" [disabled]="!clipsReady()">
+          <mat-icon>replay</mat-icon>
+          Restart
+        </button>
+      </div>
+
+      <div class="rate-control">
+        <label for="rate">
+          <mat-icon>speed</mat-icon>
+          Playback speed: {{ playbackRate() }}x
+        </label>
+        <input
+          id="rate"
+          type="range"
+          min="0.1"
+          max="1"
+          step="0.05"
+          [value]="playbackRate()"
+          (input)="onRateInput($event)"
+        />
+      </div>
     </div>
   } @else {
     <div class="empty-state">
