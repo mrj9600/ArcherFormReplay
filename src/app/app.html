@@ -1,3 +1,10 @@
+@if (updateAvailable()) {
+  <div class="update-banner">
+    <span>A new version is available.</span>
+    <button mat-flat-button color="primary" (click)="reloadForUpdate()">Refresh</button>
+  </div>
+}
+
 <main class="app-content">
   <router-outlet />
 </main>

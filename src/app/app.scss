@@ -5,6 +5,23 @@
   width: 100%;
 }
 
+.update-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  background: #3f51b5;
+  color: #fff;
+  font-size: 0.85rem;
+
+  button {
+    flex: 0 0 auto;
+  }
+}
+
 .app-content {
   flex: 1 1 auto;
   overflow-y: auto;
