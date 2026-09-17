@@ -2,6 +2,7 @@ import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { SettingsService } from '../../services/settings.service';
 import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
+import { CameraService } from '../../services/camera.service';
 import { APP_VERSION } from '../../version';
 
 @Component({
@@ -13,6 +14,7 @@ import { APP_VERSION } from '../../version';
 export class Settings implements OnInit {
   protected readonly settingsService = inject(SettingsService);
   protected readonly soundTrigger = inject(SoundTriggerService);
+  protected readonly camera = inject(CameraService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly appVersion = APP_VERSION;
@@ -30,12 +32,18 @@ export class Settings implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
+    void this.camera.unlockDeviceLabels();
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.soundTrigger.start(this.micStream, this.settingsService.settings().micSensitivity);
     } catch (err) {
       this.micError.set(err instanceof Error ? err.message : 'Microphone access failed');
     }
+  }
+
+  protected onCameraChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.camera.setPreferredDevice(value || null);
   }
 
   protected onPreRollInput(event: Event): void {

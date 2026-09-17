@@ -1,4 +1,20 @@
 <div class="settings-page">
+  @if (camera.devices().length > 0) {
+    <div class="setting">
+      <label for="camera">
+        <mat-icon>videocam</mat-icon>
+        Camera
+      </label>
+      <select id="camera" [value]="camera.preferredDeviceId() ?? ''" (change)="onCameraChange($event)">
+        <option value="">Default (rear-facing)</option>
+        @for (device of camera.devices(); track device.deviceId) {
+          <option [value]="device.deviceId">{{ device.label || 'Camera ' + device.deviceId.slice(-4) }}</option>
+        }
+      </select>
+      <p class="hint">Applies next time Record opens.</p>
+    </div>
+  }
+
   <div class="setting">
     <label for="preRoll">
       <mat-icon>history</mat-icon>
