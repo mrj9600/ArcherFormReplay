@@ -6,8 +6,9 @@
 }
 
 .clip-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 0.75rem;
 }
 
@@ -15,6 +16,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .clip-tile-header {
@@ -49,10 +52,16 @@
 }
 
 .player {
-  width: 100%;
-  max-height: 50vh;
+  // Sized by height (not width): width is then derived from the aspect-ratio above, so the tile
+  // is only ever as wide as its own footage actually needs - no letterboxing, and narrow clips
+  // leave room for others to sit alongside them instead of each stretching to fill a full-width
+  // column.
+  height: 50vh;
+  width: auto;
+  max-width: 100%;
   background: #000;
   border-radius: 8px;
+  object-fit: contain;
   display: block;
 }
 

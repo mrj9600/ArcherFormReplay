@@ -33,6 +33,10 @@ export class Review {
   protected readonly timelinePosition = signal(0);
   /** Each clip's own real duration, in clipSet.clips order - shown next to its device label. */
   protected readonly clipDurations = signal<number[]>([]);
+  /** Each clip's own width/height ratio, in clipSet.clips order - sizes its tile to fit the
+   *  actual footage instead of a fixed box with letterboxing, and lets several tiles sit
+   *  side by side once each is only as wide as its own content needs. */
+  protected readonly clipAspectRatios = signal<number[]>([]);
 
   /** Bumped for every new clip set so a slow in-flight prepare() for a stale set can detect it's obsolete and stop. */
   private generation = 0;
@@ -98,6 +102,12 @@ export class Review {
     return `${(isFinite(seconds) && seconds > 0 ? seconds : 0).toFixed(1)}s`;
   }
 
+  /** Falls back to a 16:9 guess before the real aspect ratio is known, so the tile reserves a
+   *  reasonable shape immediately instead of jumping in size once metadata loads. */
+  protected aspectRatioFor(index: number): number {
+    return this.clipAspectRatios()[index] || 16 / 9;
+  }
+
   protected downloadFilename(clip: StoredClip, index: number): string {
     const ext = clip.mimeType.includes('mp4') ? 'mp4' : 'webm';
     const safeLabel =
@@ -134,6 +144,7 @@ export class Review {
     this.setupEndedListeners(generation);
     this.setupTimelineTracking();
     this.clipDurations.set(this.durationsAndMax().durations);
+    this.clipAspectRatios.set(videos.map((v) => (v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 16 / 9)));
     this.clipsReady.set(true);
     this.playFrom(0);
   }

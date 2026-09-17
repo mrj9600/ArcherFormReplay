@@ -23,7 +23,7 @@
               <mat-icon>download</mat-icon>
             </a>
           </div>
-          <video #player [src]="clip.url" playsinline class="player"></video>
+          <video #player [src]="clip.url" playsinline class="player" [style.aspect-ratio]="aspectRatioFor(i)"></video>
         </div>
       }
     </div>
