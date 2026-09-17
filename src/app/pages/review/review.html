@@ -8,7 +8,12 @@
       @for (clip of clipSet.clips; track clip.url; let i = $index) {
         <div class="clip-tile">
           <div class="clip-tile-header">
-            <span class="clip-label">{{ clip.deviceLabel }}</span>
+            <span class="clip-label">
+              {{ clip.deviceLabel }}
+              @if (clipDurations()[i]; as duration) {
+                <span class="clip-duration">({{ formatTime(duration) }})</span>
+              }
+            </span>
             <a
               class="download-link"
               [href]="clip.url"

@@ -31,6 +31,8 @@ export class Review {
    *  currentTime while playing (see setupTimelineTracking()), since that clip always starts at
    *  session time 0 with no delay - and set directly while the user is scrubbing or restarting. */
   protected readonly timelinePosition = signal(0);
+  /** Each clip's own real duration, in clipSet.clips order - shown next to its device label. */
+  protected readonly clipDurations = signal<number[]>([]);
 
   /** Bumped for every new clip set so a slow in-flight prepare() for a stale set can detect it's obsolete and stop. */
   private generation = 0;
@@ -114,6 +116,7 @@ export class Review {
     this.applyRates();
     this.setupEndedListeners(generation);
     this.setupTimelineTracking();
+    this.clipDurations.set(this.durationsAndMax().durations);
     this.clipsReady.set(true);
     this.playFrom(0);
   }
