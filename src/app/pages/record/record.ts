@@ -152,6 +152,14 @@ export class Record implements OnInit {
     this.status.set(this.computeIdleStatus());
   }
 
+  /** Unconditionally returns to the idle status - unlike syncIdleStatus(), which deliberately
+   *  leaves 'capturing' alone so reactive settings/role changes can't clobber an active capture.
+   *  A trigger handler's own finally block is the one legitimate place that capturing state
+   *  needs to be cleared from, so it must bypass that guard rather than go through it. */
+  private clearCapturingStatus(): void {
+    this.status.set(this.computeIdleStatus());
+  }
+
   /** The role/trigger-device-aware status to show whenever nothing is actively capturing -
    *  used both as the initial value (so the page never shows a generic "starting" state) and
    *  whenever role/trigger-device assignment changes. */
@@ -194,7 +202,7 @@ export class Record implements OnInit {
     } finally {
       // Always clears the 'capturing' state, even on an unexpected error - otherwise the device
       // would be stuck refusing every future trigger.
-      this.syncIdleStatus();
+      this.clearCapturingStatus();
     }
   }
 
@@ -208,7 +216,7 @@ export class Record implements OnInit {
     } catch (err) {
       console.error('Slave trigger handling failed', err);
     } finally {
-      this.syncIdleStatus();
+      this.clearCapturingStatus();
     }
   }
 }
