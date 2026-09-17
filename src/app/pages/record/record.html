@@ -41,7 +41,7 @@
           <mat-chip color="primary" highlighted>Coordinating session</mat-chip>
         }
         @case ('capturing') {
-          @if (session.role() === 'master' && session.collectionProgress(); as progress) {
+          @if (session.role() === 'master' && collectionDisplay(); as progress) {
             <mat-chip color="accent" highlighted>Collecting clips… ({{ progress.received }}/{{ progress.expected }})</mat-chip>
           } @else {
             <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>

@@ -39,6 +39,20 @@ export class Record implements OnInit {
   /** Master always gets a manual override; a slave only gets one when it's the assigned trigger device. */
   protected readonly showTestButton = computed(() => this.session.role() !== 'slave' || this.session.isTriggerDevice());
 
+  /** Master only, while recording its own video: true once its own clip has been extracted for
+   *  the in-progress trigger - session.collectionProgress() only tracks slave arrivals, so this
+   *  is folded in separately to make "Collecting clips…" reflect the master's own clip too. */
+  private readonly ownClipReady = signal(false);
+  protected readonly collectionDisplay = computed(() => {
+    const progress = this.session.collectionProgress();
+    if (!progress) return null;
+    const includesOwn = this.recordsVideo();
+    return {
+      received: progress.received + (includesOwn && this.ownClipReady() ? 1 : 0),
+      expected: progress.expected + (includesOwn ? 1 : 0),
+    };
+  });
+
   private readonly isReady = signal(false);
   private micOnlyStream: MediaStream | null = null;
   private acquiringMic = false;
@@ -179,10 +193,17 @@ export class Record implements OnInit {
       const recordsVideo = this.recordsVideo();
       const expectedSlaveCount = this.session.expectedClipCount;
       const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp) : -1;
+      this.ownClipReady.set(false);
 
       const { preRollSeconds, postRollSeconds } = this.settings.settings();
+      const ownClipPromise = recordsVideo
+        ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds).then((blob) => {
+            this.ownClipReady.set(true);
+            return blob;
+          })
+        : Promise.resolve(null);
       const [ownBlob, slaveClips] = await Promise.all([
-        recordsVideo ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds) : Promise.resolve(null),
+        ownClipPromise,
         isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve(new Map<string, Blob>()),
       ]);
 
