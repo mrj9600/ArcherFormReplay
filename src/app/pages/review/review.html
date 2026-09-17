@@ -25,8 +25,6 @@
 
     @if (!clipsReady()) {
       <p class="hint">Preparing clip{{ clipSet.clips.length > 1 ? 's' : '' }}…</p>
-    } @else if (settingsService.settings().autoplayDelaySeconds > 0 && loopsCompleted() === 0 && !isPlaying()) {
-      <p class="hint">Auto-playing in {{ settingsService.settings().autoplayDelaySeconds }}s…</p>
     }
 
     @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
@@ -38,6 +36,23 @@
     }
 
     <div class="controls" [class.disabled]="!clipsReady()">
+      <div class="timeline">
+        <input
+          type="range"
+          class="scrub"
+          min="0"
+          [max]="timelineDuration()"
+          step="0.01"
+          [value]="timelinePosition()"
+          [disabled]="!clipsReady()"
+          (input)="onScrubInput($event)"
+        />
+        <div class="timeline-labels">
+          <span>{{ formatTime(timelinePosition()) }}</span>
+          <span>{{ formatTime(timelineDuration()) }}</span>
+        </div>
+      </div>
+
       <div class="playback-controls">
         @if (isPlaying()) {
           <button mat-stroked-button (click)="pauseAll()" [disabled]="!clipsReady()">

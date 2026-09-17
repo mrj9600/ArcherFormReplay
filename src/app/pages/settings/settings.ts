@@ -91,10 +91,6 @@ export class Settings implements OnInit {
     this.soundTrigger.setThreshold(value);
   }
 
-  protected onAutoplayDelayInput(event: Event): void {
-    this.settingsService.update({ autoplayDelaySeconds: Number((event.target as HTMLInputElement).value) });
-  }
-
   protected onSyncClipEndsChange(event: Event): void {
     this.settingsService.update({ syncClipEnds: (event.target as HTMLInputElement).checked });
   }

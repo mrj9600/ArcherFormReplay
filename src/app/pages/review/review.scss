@@ -90,6 +90,23 @@
   }
 }
 
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+
+  .scrub {
+    width: 100%;
+  }
+}
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.5);
+}
+
 .playback-controls {
   display: flex;
   gap: 0.5rem;

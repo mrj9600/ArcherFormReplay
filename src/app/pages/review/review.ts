@@ -24,6 +24,14 @@ export class Review {
   protected readonly autoReturnCancelled = signal(false);
   protected readonly loopsCompleted = signal(0);
 
+  /** The longest clip's duration - the scrub slider's range, and the shared "session timeline"
+   *  every clip is positioned against (see playFrom()/seekTo()). */
+  protected readonly timelineDuration = signal(0);
+  /** Current position on that shared timeline, in seconds. Driven by the longest clip's own
+   *  currentTime while playing (see setupTimelineTracking()), since that clip always starts at
+   *  session time 0 with no delay - and set directly while the user is scrubbing or restarting. */
+  protected readonly timelinePosition = signal(0);
+
   /** Bumped for every new clip set so a slow in-flight prepare() for a stale set can detect it's obsolete and stop. */
   private generation = 0;
   private endedIndices = new Set<number>();
@@ -51,31 +59,9 @@ export class Review {
     this.applyRates();
   }
 
+  /** Resumes from wherever the shared timeline currently sits (e.g. after a pause or a scrub). */
   protected playAll(): void {
-    if (!this.clipsReady()) return;
-    this.clearPendingStartTimers();
-    this.applyRates();
-    this.isPlaying.set(true);
-
-    const videos = this.videoRefs().map((ref) => ref.nativeElement);
-    const rate = this.playbackRate();
-    const sync = this.settingsService.settings().syncClipEnds;
-    if (!sync || videos.length <= 1) {
-      for (const video of videos) void video.play();
-      return;
-    }
-
-    const durations = videos.map((v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 0));
-    const maxDuration = Math.max(...durations, 0);
-    videos.forEach((video, i) => {
-      const duration = durations[i] || maxDuration;
-      const delayMs = maxDuration > 0 ? ((maxDuration - duration) / rate) * 1000 : 0;
-      if (delayMs <= 0) {
-        void video.play();
-      } else {
-        this.pendingStartTimers.push(setTimeout(() => void video.play(), delayMs));
-      }
-    });
+    this.playFrom(this.timelinePosition());
   }
 
   protected pauseAll(): void {
@@ -85,9 +71,17 @@ export class Review {
   }
 
   protected restartAll(): void {
-    this.clearPendingStartTimers();
-    for (const ref of this.videoRefs()) ref.nativeElement.currentTime = 0;
-    this.playAll();
+    this.playFrom(0);
+  }
+
+  /** Scrub slider handler - pauses (scrubbing while playing would otherwise fight the slider's
+   *  own timeupdate-driven updates) and repositions every clip to the dragged-to timeline point. */
+  protected onScrubInput(event: Event): void {
+    if (!this.clipsReady()) return;
+    const value = Number((event.target as HTMLInputElement).value);
+    this.pauseAll();
+    this.timelinePosition.set(value);
+    this.seekTo(value);
   }
 
   protected cancelAutoReturn(): void {
@@ -96,6 +90,10 @@ export class Review {
 
   protected loopsConfigured(): number {
     return this.settingsService.settings().autoReturnLoops;
+  }
+
+  protected formatTime(seconds: number): string {
+    return `${(isFinite(seconds) && seconds > 0 ? seconds : 0).toFixed(1)}s`;
   }
 
   protected downloadFilename(clip: StoredClip, index: number): string {
@@ -115,13 +113,9 @@ export class Review {
 
     this.applyRates();
     this.setupEndedListeners(generation);
+    this.setupTimelineTracking();
     this.clipsReady.set(true);
-
-    const delaySeconds = this.settingsService.settings().autoplayDelaySeconds;
-    if (delaySeconds <= 0) return;
-    await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
-    if (generation !== this.generation) return;
-    this.playAll();
+    this.playFrom(0);
   }
 
   /** Resolves once `video.duration` is a real finite number. MediaRecorder's raw streaming
@@ -170,6 +164,70 @@ export class Review {
   private clearPendingStartTimers(): void {
     for (const timer of this.pendingStartTimers) clearTimeout(timer);
     this.pendingStartTimers = [];
+  }
+
+  /** Every clip's real duration, and the longest one - the shared "session timeline" length. */
+  private durationsAndMax(): { videos: HTMLVideoElement[]; durations: number[]; maxDuration: number } {
+    const videos = this.videoRefs().map((ref) => ref.nativeElement);
+    const durations = videos.map((v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 0));
+    const maxDuration = Math.max(...durations, 0);
+    return { videos, durations, maxDuration };
+  }
+
+  /** How far into the shared timeline a clip of this duration starts, when sync is enabled -
+   *  0 for the longest clip (and always, when sync is off), matching playFrom()/seekTo(). */
+  private startDelaySeconds(duration: number, maxDuration: number, clipCount: number): number {
+    const sync = this.settingsService.settings().syncClipEnds;
+    return sync && clipCount > 1 ? Math.max(0, maxDuration - duration) : 0;
+  }
+
+  /** Starts (or resumes) playback from a given point on the shared timeline. A clip whose
+   *  synced start delay hasn't been reached yet is positioned at its own 0 and scheduled to
+   *  start once the remaining delay elapses, exactly as a fresh playFrom(0) does. */
+  private playFrom(sessionSeconds: number): void {
+    if (!this.clipsReady()) return;
+    this.clearPendingStartTimers();
+    this.applyRates();
+    this.isPlaying.set(true);
+    this.timelinePosition.set(sessionSeconds);
+
+    const { videos, durations, maxDuration } = this.durationsAndMax();
+    const rate = this.playbackRate();
+    videos.forEach((video, i) => {
+      const duration = durations[i] || maxDuration;
+      const delaySec = this.startDelaySeconds(duration, maxDuration, videos.length);
+      const remainingDelaySec = delaySec - sessionSeconds;
+      if (remainingDelaySec <= 0) {
+        video.currentTime = Math.min(Math.max(sessionSeconds - delaySec, 0), duration);
+        void video.play();
+      } else {
+        video.currentTime = 0;
+        this.pendingStartTimers.push(setTimeout(() => void video.play(), (remainingDelaySec / rate) * 1000));
+      }
+    });
+  }
+
+  /** Repositions every clip to a point on the shared timeline without playing - used while
+   *  the user drags the scrub slider. */
+  private seekTo(sessionSeconds: number): void {
+    const { videos, durations, maxDuration } = this.durationsAndMax();
+    videos.forEach((video, i) => {
+      const duration = durations[i] || maxDuration;
+      const delaySec = this.startDelaySeconds(duration, maxDuration, videos.length);
+      video.currentTime = Math.min(Math.max(sessionSeconds - delaySec, 0), duration);
+    });
+  }
+
+  /** Drives the scrub slider's range/position from the longest clip - the one clip that always
+   *  starts at shared-timeline 0 with no delay, whether sync is on or off (see startDelaySeconds()). */
+  private setupTimelineTracking(): void {
+    const { videos, durations, maxDuration } = this.durationsAndMax();
+    this.timelineDuration.set(maxDuration);
+    this.timelinePosition.set(0);
+    const referenceIndex = durations.indexOf(maxDuration);
+    const reference = videos[referenceIndex];
+    if (!reference) return;
+    reference.ontimeupdate = () => this.timelinePosition.set(reference.currentTime);
   }
 
   private setupEndedListeners(generation: number): void {
