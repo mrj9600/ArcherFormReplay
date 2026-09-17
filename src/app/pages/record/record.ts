@@ -13,7 +13,7 @@ import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
 import { SessionService } from '../../services/session.service';
 
-type RecordStatus = 'starting' | 'listening' | 'waiting-for-master' | 'coordinating' | 'capturing' | 'error';
+type RecordStatus = 'listening' | 'waiting-for-master' | 'coordinating' | 'capturing' | 'error';
 
 @Component({
   selector: 'app-record',
@@ -32,7 +32,7 @@ export class Record implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
-  protected readonly status = signal<RecordStatus>('starting');
+  protected readonly status = signal<RecordStatus>(this.computeIdleStatus());
   protected readonly meterScale = METER_DISPLAY_SCALE;
   protected readonly recordsVideo = signal(true);
 
@@ -148,51 +148,67 @@ export class Record implements OnInit {
   }
 
   private syncIdleStatus(): void {
-    if (this.status() === 'capturing' || this.status() === 'error' || this.status() === 'starting') return;
+    if (this.status() === 'capturing' || this.status() === 'error') return;
+    this.status.set(this.computeIdleStatus());
+  }
+
+  /** The role/trigger-device-aware status to show whenever nothing is actively capturing -
+   *  used both as the initial value (so the page never shows a generic "starting" state) and
+   *  whenever role/trigger-device assignment changes. */
+  private computeIdleStatus(): RecordStatus {
     const isSlave = this.session.role() === 'slave';
     const isTrigger = this.session.isTriggerDevice();
-    if (isSlave) {
-      this.status.set(isTrigger ? 'listening' : 'waiting-for-master');
-    } else {
-      this.status.set(isTrigger ? 'listening' : 'coordinating');
-    }
+    if (isSlave) return isTrigger ? 'listening' : 'waiting-for-master';
+    return isTrigger ? 'listening' : 'coordinating';
   }
 
   private async handleLocalTrigger(timestamp: number): Promise<void> {
     if (this.status() === 'capturing') return;
     this.status.set('capturing');
 
-    const isMaster = this.session.role() === 'master';
-    const recordsVideo = this.recordsVideo();
-    const expectedSlaveCount = this.session.expectedClipCount;
-    const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp) : -1;
+    try {
+      const isMaster = this.session.role() === 'master';
+      const recordsVideo = this.recordsVideo();
+      const expectedSlaveCount = this.session.expectedClipCount;
+      const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp) : -1;
 
-    const { preRollSeconds, postRollSeconds } = this.settings.settings();
-    const [ownBlob, slaveClips] = await Promise.all([
-      recordsVideo ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds) : Promise.resolve(null),
-      isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve(new Map<string, Blob>()),
-    ]);
+      const { preRollSeconds, postRollSeconds } = this.settings.settings();
+      const [ownBlob, slaveClips] = await Promise.all([
+        recordsVideo ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds) : Promise.resolve(null),
+        isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve(new Map<string, Blob>()),
+      ]);
 
-    const items: { deviceLabel: string; blob: Blob }[] = [];
-    if (ownBlob) items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob });
-    let index = 1;
-    for (const [slaveId, blob] of slaveClips) {
-      index += 1;
-      items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
+      const items: { deviceLabel: string; blob: Blob }[] = [];
+      if (ownBlob) items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob });
+      let index = 1;
+      for (const [slaveId, blob] of slaveClips) {
+        index += 1;
+        items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
+      }
+      const missing = expectedSlaveCount - slaveClips.size;
+      this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
+
+      void this.router.navigate(['/review']);
+    } catch (err) {
+      console.error('Local trigger handling failed', err);
+    } finally {
+      // Always clears the 'capturing' state, even on an unexpected error - otherwise the device
+      // would be stuck refusing every future trigger.
+      this.syncIdleStatus();
     }
-    const missing = expectedSlaveCount - slaveClips.size;
-    this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
-
-    this.syncIdleStatus();
-    void this.router.navigate(['/review']);
   }
 
   private async handleSlaveTrigger(localTs: number, triggerSeq: number): Promise<void> {
     if (this.status() === 'capturing') return;
     this.status.set('capturing');
-    const { preRollSeconds, postRollSeconds } = this.settings.settings();
-    const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
-    this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
-    this.syncIdleStatus();
+    try {
+      const { preRollSeconds, postRollSeconds } = this.settings.settings();
+      const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
+      this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
+    } catch (err) {
+      console.error('Slave trigger handling failed', err);
+    } finally {
+      this.syncIdleStatus();
+    }
   }
 }

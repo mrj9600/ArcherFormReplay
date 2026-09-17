@@ -27,9 +27,6 @@
 
     <ng-template #statusChip>
       @switch (status()) {
-        @case ('starting') {
-          <mat-chip>Starting…</mat-chip>
-        }
         @case ('listening') {
           <mat-chip color="primary" highlighted>Listening for release</mat-chip>
         }
@@ -63,7 +60,7 @@
     @if (showTestButton()) {
       <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
         <mat-icon>bolt</mat-icon>
-        Test trigger
+        Manual trigger
       </button>
     } @else {
       <p class="hint">This device is a camera angle in the session — the clip is captured automatically when the trigger device detects a release.</p>

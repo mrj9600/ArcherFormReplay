@@ -102,7 +102,12 @@ export class RollingBufferRecorderService {
     try {
       const startSec = (windowStart - segmentStartedAt) / 1000;
       const endSec = (windowEnd - segmentStartedAt) / 1000;
-      return await trimClip(rawBlob, startSec, endSec, mimeType);
+      // A hard timeout, not just a try/catch: a trim that hangs (rather than rejects) would
+      // otherwise leave the caller awaiting forever, stuck in "capturing" indefinitely.
+      return await Promise.race([
+        trimClip(rawBlob, startSec, endSec, mimeType),
+        new Promise<Blob>((_, reject) => setTimeout(() => reject(new Error('Clip trim timed out')), 8_000)),
+      ]);
     } catch (err) {
       console.error('Clip trim failed, using untrimmed capture instead', err);
       return rawBlob;
