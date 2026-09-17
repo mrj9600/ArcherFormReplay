@@ -68,12 +68,6 @@ export function isSessionMessage(data: unknown): data is SessionMessage {
 /** Devices connect as `${ROOM_ID_PREFIX}${code}` so PeerJS IDs don't collide with unrelated public-broker peers. */
 export const ROOM_ID_PREFIX = 'archer-form-replay-';
 
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I - avoids visual ambiguity
-
 export function generateRoomCode(): string {
-  let code = '';
-  for (let i = 0; i < 5; i++) {
-    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
-  }
-  return code;
+  return String(Math.floor(Math.random() * 10_000)).padStart(4, '0');
 }

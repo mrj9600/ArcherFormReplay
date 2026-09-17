@@ -16,12 +16,14 @@
 
       <div class="role-card">
         <h2><mat-icon>videocam</mat-icon> Add a camera angle</h2>
-        <p>Enter the code shown on the master device.</p>
+        <p>Enter the PIN shown on the master device.</p>
         <input
           type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
           class="code-input"
-          placeholder="ROOM CODE"
-          maxlength="5"
+          placeholder="PIN"
+          maxlength="4"
           [value]="joinCode()"
           (input)="onJoinCodeInput($event)"
         />
@@ -42,7 +44,7 @@
         @if (session.connectionState() === 'connecting') {
           <p>Starting session…</p>
         } @else if (session.connectionState() === 'connected') {
-          <p>Room code — give this to other devices:</p>
+          <p>PIN — give this to other devices:</p>
           <div class="room-code">{{ session.roomCode() }}</div>
 
           <h3>Connected devices ({{ session.connectedSlaves().length }})</h3>
@@ -90,7 +92,7 @@
         @if (session.connectionState() === 'connecting') {
           <p>Connecting to {{ joinCode() || session.roomCode() }}…</p>
         } @else if (session.connectionState() === 'connected') {
-          <p>Connected to room <strong>{{ session.roomCode() }}</strong>.</p>
+          <p>Connected using PIN <strong>{{ session.roomCode() }}</strong>.</p>
           @if (session.isTriggerDevice()) {
             <p class="hint">This device is the trigger — it listens for the release sound.</p>
           } @else {

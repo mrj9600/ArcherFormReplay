@@ -44,7 +44,10 @@ export class Session {
   }
 
   protected onJoinCodeInput(event: Event): void {
-    this.joinCode.set((event.target as HTMLInputElement).value);
+    const input = event.target as HTMLInputElement;
+    const digitsOnly = input.value.replace(/\D/g, '').slice(0, 4);
+    input.value = digitsOnly;
+    this.joinCode.set(digitsOnly);
   }
 
   protected onTriggerDeviceChange(event: Event): void {

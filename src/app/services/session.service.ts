@@ -39,6 +39,7 @@ export interface LocalTriggerEvent {
 
 const SYNC_PING_COUNT = 5;
 const SYNC_INTERVAL_MS = 15_000;
+const MAX_ROOM_CODE_ATTEMPTS = 5;
 
 /**
  * Owns the PeerJS connection(s) for a pairing session and speaks the small JSON+binary
@@ -118,7 +119,13 @@ export class SessionService {
     this.teardown();
     this.role.set('master');
     this.connectionState.set('connecting');
+    return this.tryStartMaster(MAX_ROOM_CODE_ATTEMPTS);
+  }
 
+  /** A 4-digit PIN only has 10,000 possible values, so a collision with someone else's active
+   *  session on the shared public broker is plausible - unlike the old longer code, worth a few
+   *  automatic retries with a fresh PIN before surfacing an error. */
+  private tryStartMaster(attemptsLeft: number): Promise<string> {
     return new Promise((resolve, reject) => {
       const code = generateRoomCode();
       const peer = new Peer(`${ROOM_ID_PREFIX}${code}`);
@@ -132,6 +139,11 @@ export class SessionService {
       });
       peer.on('connection', (conn) => this.acceptSlaveConnection(conn));
       peer.on('error', (err) => {
+        if (err.type === 'unavailable-id' && attemptsLeft > 1) {
+          peer.destroy();
+          this.tryStartMaster(attemptsLeft - 1).then(resolve, reject);
+          return;
+        }
         this.error.set(err.message);
         this.connectionState.set('error');
         reject(err);
@@ -143,7 +155,7 @@ export class SessionService {
     this.teardown();
     this.role.set('slave');
     this.connectionState.set('connecting');
-    const code = rawCode.trim().toUpperCase();
+    const code = rawCode.replace(/\D/g, '');
 
     return new Promise((resolve, reject) => {
       const peer = new Peer();
