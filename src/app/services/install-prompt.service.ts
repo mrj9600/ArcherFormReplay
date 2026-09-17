@@ -5,6 +5,7 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+
 /** Captures the browser's install prompt (Chrome/Edge/Android) so it can be triggered from our own UI instead of waiting on the browser's own heuristics. */
 @Injectable({ providedIn: 'root' })
 export class InstallPromptService {
