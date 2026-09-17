@@ -1,7 +1,16 @@
 :host {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  // 100dvh (dynamic viewport height) recalculates as the mobile browser's address bar/toolbar
+  // shows or hides - right after a fresh page load (a real navigation, unlike normal in-app SPA
+  // routing), that toolbar is often still animating/settling, so the very first layout pass can
+  // use a height taller than what's actually visible. With this flex column pinning the bottom
+  // nav to the end, that shows up as the nav being pushed below the visible viewport until the
+  // toolbar finishes collapsing (or the page is scrolled) - most reliably hit via the SW-update
+  // "Refresh" button, since that always does a real reload rather than an in-app navigation.
+  // 100svh (small viewport height) is the guaranteed-visible minimum instead, so the nav is never
+  // laid out below the fold - at the cost of a little unused space once the toolbar does hide.
+  height: 100svh;
   width: 100%;
 }
 
