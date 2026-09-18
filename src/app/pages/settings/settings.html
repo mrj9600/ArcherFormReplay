@@ -81,34 +81,32 @@
     <label class="toggle-row">
       <input type="checkbox" [checked]="settingsService.settings().autoSaveClips" (change)="onAutoSaveClipsChange($event)" />
       <mat-icon>save</mat-icon>
-      Save clips automatically instead of opening Review
+      Also save clips automatically
     </label>
     <p class="hint">
       Each clip downloads straight to the device as soon as it's captured, named
-      {{ '{timestamp}_{shot}_{camera}' }} - the timestamp is fixed to the first shot after Record
-      opens. Auto-return below doesn't apply while this is on, since Review never opens.
+      {{ '{timestamp}_{shot}_{camera}' }} - the timestamp is fixed to the first shot of a shooting
+      session. Works with any auto-return setting below.
     </p>
   </div>
 
   <div class="setting">
     <label for="autoReturn">
       <mat-icon>replay</mat-icon>
-      @if (settingsService.settings().autoReturnLoops > 0) {
-        Auto-return to Record after playing {{ settingsService.settings().autoReturnLoops }}x
-      } @else {
-        Auto-return to Record: off (review manually)
-      }
+      Auto return to Record
     </label>
-    <input
-      id="autoReturn"
-      type="range"
-      min="0"
-      max="5"
-      step="1"
-      [value]="settingsService.settings().autoReturnLoops"
-      (input)="onAutoReturnLoopsInput($event)"
-    />
-    <p class="hint">Can always be cancelled from the Review page once it's counting down.</p>
+    <select id="autoReturn" (change)="onAutoReturnChange($event)">
+      <option value="off" [selected]="autoReturnValue() === 'off'">Off</option>
+      <option value="manual" [selected]="autoReturnValue() === 'manual'">Manual</option>
+      @for (n of autoReturnLoopOptions; track n) {
+        <option [value]="n" [selected]="autoReturnValue() === '' + n">{{ n }}</option>
+      }
+    </select>
+    <p class="hint">
+      Off: skip Review - stay on Record and get ready for the next shot (only useful with
+      auto-save on). Manual: open Review and go back to Record yourself. 1-5: open Review and return
+      to Record automatically after playing that many times (can be cancelled from Review).
+    </p>
   </div>
 
   <p class="version">Version {{ appVersion.sha }} · built {{ appVersion.builtAt }}</p>

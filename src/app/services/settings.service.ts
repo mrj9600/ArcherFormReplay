@@ -7,18 +7,22 @@ export interface AppSettings {
   micSensitivity: number;
   /** When multiple clips have different lengths, slow the shorter ones down so every clip ends at the same time. */
   syncClipEnds: boolean;
-  /** How many times to auto-play the review before returning to Record. 0 disables auto-return. */
+  /** What happens after a shot: 0 = off (skip Review, stay on Record and re-arm),
+   *  AUTO_RETURN_MANUAL = open Review and go back manually, 1-5 = open Review and return to
+   *  Record automatically after playing that many times. */
   autoReturnLoops: number;
-  /** Skip Review entirely - download each clip straight to the device as soon as it's captured. */
+  /** Also download each clip straight to the device as soon as it's captured, independent of what happens after the shot (see autoReturnLoops). */
   autoSaveClips: boolean;
 }
+
+export const AUTO_RETURN_MANUAL = -1;
 
 const DEFAULT_SETTINGS: AppSettings = {
   preRollSeconds: 3,
   postRollSeconds: 2,
   micSensitivity: 0.04,
   syncClipEnds: true,
-  autoReturnLoops: 0,
+  autoReturnLoops: AUTO_RETURN_MANUAL,
   autoSaveClips: false,
 };
 

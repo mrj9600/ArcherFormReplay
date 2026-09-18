@@ -115,7 +115,7 @@ export class Review {
   }
 
   protected loopsConfigured(): number {
-    return this.settingsService.settings().autoReturnLoops;
+    return Math.max(0, this.settingsService.settings().autoReturnLoops);
   }
 
   protected formatTime(seconds: number): string {

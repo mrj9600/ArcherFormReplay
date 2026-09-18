@@ -1,6 +1,6 @@
 import { Component, DestroyRef, ElementRef, OnInit, effect, inject, signal, viewChild } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
-import { SettingsService } from '../../services/settings.service';
+import { AUTO_RETURN_MANUAL, SettingsService } from '../../services/settings.service';
 import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { CameraService } from '../../services/camera.service';
 import { APP_VERSION } from '../../version';
@@ -89,8 +89,18 @@ export class Settings implements OnInit {
     this.settingsService.update({ syncClipEnds: (event.target as HTMLInputElement).checked });
   }
 
-  protected onAutoReturnLoopsInput(event: Event): void {
-    this.settingsService.update({ autoReturnLoops: Number((event.target as HTMLInputElement).value) });
+  protected readonly autoReturnLoopOptions = [1, 2, 3, 4, 5];
+
+  protected autoReturnValue(): string {
+    const loops = this.settingsService.settings().autoReturnLoops;
+    if (loops === AUTO_RETURN_MANUAL) return 'manual';
+    return loops > 0 ? String(loops) : 'off';
+  }
+
+  protected onAutoReturnChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    const autoReturnLoops = value === 'manual' ? AUTO_RETURN_MANUAL : value === 'off' ? 0 : Number(value);
+    this.settingsService.update({ autoReturnLoops });
   }
 
   protected onAutoSaveClipsChange(event: Event): void {

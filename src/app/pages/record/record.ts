@@ -107,11 +107,6 @@ export class Record implements OnInit {
   private micOnlyStream: MediaStream | null = null;
   private acquiringMic = false;
 
-  /** Auto-save naming (see settings.autoSaveClips): fixed to the first shot after this page
-   *  opens, then reused for every later shot in the same visit - only the shot number advances. */
-  private sessionTimestamp: string | null = null;
-  private sessionShotNumber = 0;
-
   constructor() {
     effect(() => {
       const video = this.videoRef()?.nativeElement;
@@ -191,9 +186,6 @@ export class Record implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    this.sessionTimestamp = null;
-    this.sessionShotNumber = 0;
-
     try {
       const role = this.session.role();
       const isSlave = role === 'slave';
@@ -377,8 +369,9 @@ export class Record implements OnInit {
         console.warn(`${missing} device(s) didn't deliver a clip and are missing from this shot.`);
       }
 
-      if (this.settings.settings().autoSaveClips) {
-        this.saveClipsAutomatically(items);
+      if (this.settings.settings().autoSaveClips) this.saveClipsAutomatically(items);
+      if (this.settings.settings().autoReturnLoops === 0) {
+        // Auto return "Off": no Review - stay here and get ready for the next shot.
         restartAfterShot = true;
       } else {
         this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't deliver a clip and are missing.` : undefined);
@@ -394,9 +387,9 @@ export class Record implements OnInit {
     }
   }
 
-  /** Auto-save keeps this page open between shots, so the next shot needs a fresh, short
-   *  recording (rather than one that keeps growing) and slaves - idle since delivering their
-   *  clips - need re-arming, exactly as if the master had just come back to Record. */
+  /** Staying on this page between shots means the next shot needs a fresh, short recording
+   *  (rather than one that keeps growing) and slaves - idle since delivering their clips - need
+   *  re-arming, exactly as if the master had just come back to Record. */
   private rearmForNextShot(): void {
     const stream = this.camera.stream();
     if (this.recordsVideo() && stream) this.buffer.start(stream);
@@ -404,23 +397,20 @@ export class Record implements OnInit {
   }
 
   /** Downloads every clip from this shot straight to the device, named
-   *  {yyyyMMddHHmm}_{shot}_{camera}.{ext} - the timestamp is locked to the first shot of this
-   *  visit to Record (see ngOnInit) and reused for every later shot; only the shot number and
-   *  camera number change. Staggered slightly, like Review's "Download all" - firing several
+   *  {yyyyMMddHHmm}_{shot}_{camera}.{ext} - the timestamp is locked to the first shot of a
+   *  shooting session (see ClipStoreService.nextAutoSaveShot); only the shot number and camera
+   *  number change. Staggered slightly, like Review's "Download all" - firing several
    *  download-triggering clicks in the same tick makes some browsers silently drop all but the
    *  first. */
   private saveClipsAutomatically(items: { deviceLabel: string; blob: Blob }[]): void {
     if (items.length === 0) return;
-    if (!this.sessionTimestamp) {
-      this.sessionTimestamp = this.formatSessionTimestamp(new Date());
-    }
-    this.sessionShotNumber += 1;
-    const shotNo = String(this.sessionShotNumber).padStart(2, '0');
+    const { timestamp, shotNumber } = this.clipStore.nextAutoSaveShot();
+    const shotNo = String(shotNumber).padStart(2, '0');
 
     items.forEach((item, i) => {
       const cameraNo = i + 1;
       const ext = item.blob.type.includes('mp4') ? 'mp4' : 'webm';
-      const filename = `${this.sessionTimestamp}_${shotNo}_${cameraNo}.${ext}`;
+      const filename = `${timestamp}_${shotNo}_${cameraNo}.${ext}`;
       setTimeout(() => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(item.blob);
@@ -430,11 +420,6 @@ export class Record implements OnInit {
         a.remove();
       }, i * 200);
     });
-  }
-
-  private formatSessionTimestamp(date: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 
   private async handleSlaveTrigger(event: LocalTriggerEvent): Promise<void> {
