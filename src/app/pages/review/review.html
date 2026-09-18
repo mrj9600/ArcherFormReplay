@@ -40,9 +40,7 @@
           <button mat-button (click)="cancelAutoReturn()">Cancel</button>
         </div>
       }
-    </div>
 
-    <div class="controls" [class.disabled]="!clipsReady()">
       <div class="timeline">
         <input
           type="range"
@@ -59,45 +57,56 @@
           <span>{{ formatTime(timelineDuration()) }}</span>
         </div>
       </div>
+    </div>
 
+    <div class="controls" [class.disabled]="!clipsReady()">
       <div class="playback-controls">
         @if (isPlaying()) {
           <button mat-stroked-button (click)="pauseAll()" [disabled]="!clipsReady()">
             <mat-icon>pause</mat-icon>
-            Pause
+            <span class="btn-label">Pause</span>
           </button>
         } @else {
           <button mat-flat-button color="primary" (click)="playAll()" [disabled]="!clipsReady()">
             <mat-icon>play_arrow</mat-icon>
-            Play
+            <span class="btn-label">Play</span>
           </button>
         }
         <button mat-stroked-button (click)="restartAll()" [disabled]="!clipsReady()">
           <mat-icon>replay</mat-icon>
-          Restart
+          <span class="btn-label">Restart</span>
         </button>
         @if (clipSet.clips.length > 1) {
           <button mat-stroked-button (click)="downloadAll()">
             <mat-icon>download</mat-icon>
-            Download all
+            <span class="btn-label">Download all</span>
           </button>
         }
       </div>
 
       <div class="rate-control">
-        <label for="rate">
+        <label for="rateSelect">
           <mat-icon>speed</mat-icon>
           Playback speed: {{ playbackRate() }}x
         </label>
-        <input
-          id="rate"
-          type="range"
-          min="0.1"
-          max="1"
-          step="0.05"
-          [value]="playbackRate()"
-          (input)="onRateInput($event)"
-        />
+
+        <select id="rateSelect" class="rate-select" [value]="playbackRate()" (change)="onRateSelectChange($event)">
+          @for (speed of speedOptions; track speed) {
+            <option [value]="speed">{{ speed }}x</option>
+          }
+        </select>
+
+        <div class="rate-buttons">
+          @for (speed of speedOptions; track speed) {
+            <button
+              mat-stroked-button
+              [class.active]="playbackRate() === speed"
+              (click)="setPlaybackRate(speed)"
+            >
+              {{ speed }}x
+            </button>
+          }
+        </div>
       </div>
     </div>
   } @else {

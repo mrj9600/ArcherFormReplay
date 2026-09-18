@@ -17,6 +17,7 @@ export class Review {
   private readonly router = inject(Router);
 
   protected readonly videoRefs = viewChildren<ElementRef<HTMLVideoElement>>('player');
+  protected readonly speedOptions = [0.1, 0.25, 0.5, 1, 2];
   protected readonly playbackRate = signal(1);
   protected readonly isPlaying = signal(false);
   /** True once every clip's real duration is known - only then is autoplay/manual play allowed to start. */
@@ -59,10 +60,13 @@ export class Review {
     });
   }
 
-  protected onRateInput(event: Event): void {
-    const value = Number((event.target as HTMLInputElement).value);
-    this.playbackRate.set(value);
+  protected setPlaybackRate(rate: number): void {
+    this.playbackRate.set(rate);
     this.applyRates();
+  }
+
+  protected onRateSelectChange(event: Event): void {
+    this.setPlaybackRate(Number((event.target as HTMLSelectElement).value));
   }
 
   /** Resumes from wherever the shared timeline currently sits (e.g. after a pause or a scrub). */

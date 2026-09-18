@@ -147,10 +147,29 @@
     font-size: 0.9rem;
     color: rgba(0, 0, 0, 0.7);
   }
+}
 
-  input[type='range'] {
-    width: 100%;
+// Shown in portrait/default; swapped for .rate-select in landscape (see media query below).
+.rate-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+
+  button.active {
+    background: var(--mat-sys-primary, #3f51b5);
+    color: var(--mat-sys-on-primary, #fff);
   }
+}
+
+// Shown in landscape only - a compact dropdown fits the side rail much better than a row of
+// buttons wide enough to tap comfortably.
+.rate-select {
+  display: none;
+  width: 100%;
+  padding: 0.4rem;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  font: inherit;
 }
 
 .empty-state {
@@ -181,6 +200,22 @@
     overflow-y: auto;
   }
 
+  // Wrapping to a second row would eat back into the height just freed up above, and a phone's
+  // landscape width is still tight - so beyond what fits, clips scroll horizontally instead of
+  // wrapping. The controls sidebar is a separate flex child, so it's never part of this scroll.
+  .clip-grid {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+
+  .clip-tile {
+    // Not max-width: 100% here (unlike the default) - tiles should stay full size and scroll
+    // into view horizontally, not get squeezed to cooperatively fit the visible width.
+    flex: 0 0 auto;
+    max-width: none;
+  }
+
   .player {
     height: 85vh;
   }
@@ -189,5 +224,19 @@
     flex: 0 0 auto;
     width: 13rem;
     overflow-y: auto;
+  }
+
+  // Icon-only: a text label next to the icon is what was making these wrap/overflow in the
+  // narrow side rail.
+  .btn-label {
+    display: none;
+  }
+
+  .rate-buttons {
+    display: none;
+  }
+
+  .rate-select {
+    display: block;
   }
 }
