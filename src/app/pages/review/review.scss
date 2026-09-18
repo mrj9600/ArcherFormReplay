@@ -172,6 +172,12 @@
   font: inherit;
 }
 
+// Landscape-only stand-in for .auto-return-banner (see media query below) - a plain icon button
+// grouped with Play/Restart/Download instead of its own full-text banner row.
+.auto-return-icon-btn {
+  display: none;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -216,13 +222,25 @@
     max-width: none;
   }
 
+  // Nothing over the video box - the camera label/length/per-clip download link cost a whole
+  // row of height per tile that isn't worth it once space is this tight.
+  .clip-tile-header {
+    display: none;
+  }
+
   .player {
-    height: 85vh;
+    height: 90vh;
+  }
+
+  // No position labels under the scrub bar - just the bar itself.
+  .timeline-labels {
+    display: none;
   }
 
   .controls {
     flex: 0 0 auto;
-    width: 13rem;
+    width: 4.5rem;
+    align-items: center;
     overflow-y: auto;
   }
 
@@ -232,11 +250,32 @@
     display: none;
   }
 
+  // Stacked instead of a row - a row of even icon-only buttons was still wider than this rail.
+  .playback-controls {
+    flex-direction: column;
+  }
+
+  // The full "Returning to Record after play x of y" banner (still shown in portrait, in
+  // .review-media) is replaced by .auto-return-icon-btn grouped with Play/Restart/Download below.
+  .auto-return-banner {
+    display: none;
+  }
+
+  .auto-return-icon-btn {
+    display: inline-flex;
+  }
+
   .rate-buttons {
     display: none;
   }
 
   .rate-select {
     display: block;
+  }
+
+  // No icon/"Playback speed: 1x" label above the dropdown - the dropdown's own selected value
+  // already says the speed.
+  .rate-control label {
+    display: none;
   }
 }

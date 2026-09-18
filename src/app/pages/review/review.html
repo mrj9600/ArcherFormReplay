@@ -76,10 +76,19 @@
           <mat-icon>replay</mat-icon>
           <span class="btn-label">Restart</span>
         </button>
-        @if (clipSet.clips.length > 1) {
-          <button mat-stroked-button (click)="downloadAll()">
-            <mat-icon>download</mat-icon>
-            <span class="btn-label">Download all</span>
+        <button mat-stroked-button (click)="downloadAll()">
+          <mat-icon>download</mat-icon>
+          <span class="btn-label">Download all</span>
+        </button>
+        @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
+          <button
+            mat-stroked-button
+            class="auto-return-icon-btn"
+            (click)="cancelAutoReturn()"
+            [attr.aria-label]="'Cancel auto-return - playing ' + (loopsCompleted() + 1) + ' of ' + loopsConfigured()"
+            [title]="'Returning to Record after play ' + (loopsCompleted() + 1) + ' of ' + loopsConfigured() + ' - tap to cancel'"
+          >
+            <mat-icon>timer</mat-icon>
           </button>
         }
       </div>
