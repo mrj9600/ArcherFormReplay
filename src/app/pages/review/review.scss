@@ -2,7 +2,13 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  height: 100%;
+  // min-height, not height: with height:100%, if the content (video + controls) needed more
+  // room than that, flexbox would rather shrink .review-media/.media-scroll below their natural
+  // content size than let the page grow - and since nothing here clips that overflow, the
+  // shrunken content just silently bled past its own box into whatever sits below it (e.g. the
+  // auto-return banner overlapping the timeline slider). min-height lets the page grow past 100%
+  // instead, so .app-content's own scroll (see app.scss) handles the overflow properly.
+  min-height: 100%;
 }
 
 .review-media {
@@ -10,7 +16,6 @@
   flex-direction: column;
   gap: 1rem;
   flex: 1 1 auto;
-  min-height: 0;
 }
 
 .media-scroll {
@@ -18,7 +23,6 @@
   flex-direction: column;
   gap: 1rem;
   flex: 1 1 auto;
-  min-height: 0;
 }
 
 .clip-grid {
@@ -208,10 +212,11 @@
 @media (orientation: landscape) and (max-height: 500px) {
   .review-page {
     flex-direction: row;
-  }
-
-  .review-media {
-    overflow-y: auto;
+    // A hard ceiling again here, unlike the portrait base rule's min-height - this is what
+    // forces .media-scroll to actually overflow (and therefore scroll) instead of just growing
+    // .review-page/.controls taller right along with it, which would drag the controls sidebar
+    // down out of view as you scrolled to see a clip's bottom edge.
+    height: 100%;
   }
 
   // Wrapping to a second row would eat back into the height just freed up above, and a phone's
@@ -251,10 +256,17 @@
   // overlay visually fixed at the bottom of the view while its content scrolls underneath it.
   .review-media {
     position: relative;
+    // Restores the shrink-to-fit-and-scroll behavior the portrait base styles deliberately turn
+    // off (see .review-page above) - here it's exactly what's wanted: .media-scroll should be
+    // capped at the available row height, with its actual (taller, thanks to the padding-bottom
+    // below) content handled by its own scrollbar, not by growing .review-media/.review-page
+    // past the viewport - that would drag .controls down out of view right along with it.
+    min-height: 0;
   }
 
   .media-scroll {
     overflow-y: auto;
+    min-height: 0;
   }
 
   .clip-grid {
