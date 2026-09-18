@@ -64,6 +64,11 @@ export class Record implements OnInit {
   private micOnlyStream: MediaStream | null = null;
   private acquiringMic = false;
 
+  /** Auto-save naming (see settings.autoSaveClips): fixed to the first shot after this page
+   *  opens, then reused for every later shot in the same visit - only the shot number advances. */
+  private sessionTimestamp: string | null = null;
+  private sessionShotNumber = 0;
+
   constructor() {
     effect(() => {
       const video = this.videoRef()?.nativeElement;
@@ -127,6 +132,9 @@ export class Record implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
+    this.sessionTimestamp = null;
+    this.sessionShotNumber = 0;
+
     try {
       const role = this.session.role();
       const isSlave = role === 'slave';
@@ -239,9 +247,16 @@ export class Record implements OnInit {
         items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
       }
       const missing = expectedSlaveCount - slaveClips.size;
-      this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
+      if (missing > 0) {
+        console.warn(`${missing} device(s) didn't respond in time and are missing from this shot.`);
+      }
 
-      void this.router.navigate(['/review']);
+      if (this.settings.settings().autoSaveClips) {
+        this.saveClipsAutomatically(items);
+      } else {
+        this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
+        void this.router.navigate(['/review']);
+      }
     } catch (err) {
       console.error('Local trigger handling failed', err);
     } finally {
@@ -249,6 +264,40 @@ export class Record implements OnInit {
       // would be stuck refusing every future trigger.
       this.clearCapturingStatus();
     }
+  }
+
+  /** Downloads every clip from this shot straight to the device, named
+   *  {yyyyMMddHHmm}_{shot}_{camera}.{ext} - the timestamp is locked to the first shot of this
+   *  visit to Record (see ngOnInit) and reused for every later shot; only the shot number and
+   *  camera number change. Staggered slightly, like Review's "Download all" - firing several
+   *  download-triggering clicks in the same tick makes some browsers silently drop all but the
+   *  first. */
+  private saveClipsAutomatically(items: { deviceLabel: string; blob: Blob }[]): void {
+    if (items.length === 0) return;
+    if (!this.sessionTimestamp) {
+      this.sessionTimestamp = this.formatSessionTimestamp(new Date());
+    }
+    this.sessionShotNumber += 1;
+    const shotNo = String(this.sessionShotNumber).padStart(2, '0');
+
+    items.forEach((item, i) => {
+      const cameraNo = i + 1;
+      const ext = item.blob.type.includes('mp4') ? 'mp4' : 'webm';
+      const filename = `${this.sessionTimestamp}_${shotNo}_${cameraNo}.${ext}`;
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(item.blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }, i * 200);
+    });
+  }
+
+  private formatSessionTimestamp(date: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 
   private async handleSlaveTrigger(localTs: number, triggerSeq: number): Promise<void> {

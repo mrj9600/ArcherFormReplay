@@ -9,6 +9,8 @@ export interface AppSettings {
   syncClipEnds: boolean;
   /** How many times to auto-play the review before returning to Record. 0 disables auto-return. */
   autoReturnLoops: number;
+  /** Skip Review entirely - download each clip straight to the device as soon as it's captured. */
+  autoSaveClips: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -17,6 +19,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   micSensitivity: 0.04,
   syncClipEnds: true,
   autoReturnLoops: 0,
+  autoSaveClips: false,
 };
 
 const STORAGE_KEY = 'archer-form-replay.settings';

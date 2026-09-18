@@ -93,6 +93,19 @@
   </div>
 
   <div class="setting">
+    <label class="toggle-row">
+      <input type="checkbox" [checked]="settingsService.settings().autoSaveClips" (change)="onAutoSaveClipsChange($event)" />
+      <mat-icon>save</mat-icon>
+      Save clips automatically instead of opening Review
+    </label>
+    <p class="hint">
+      Each clip downloads straight to the device as soon as it's captured, named
+      {{ '{timestamp}_{shot}_{camera}' }} - the timestamp is fixed to the first shot after Record
+      opens. Auto-return below doesn't apply while this is on, since Review never opens.
+    </p>
+  </div>
+
+  <div class="setting">
     <label for="autoReturn">
       <mat-icon>replay</mat-icon>
       @if (settingsService.settings().autoReturnLoops > 0) {

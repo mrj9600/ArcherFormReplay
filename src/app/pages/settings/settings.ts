@@ -99,6 +99,10 @@ export class Settings implements OnInit {
     this.settingsService.update({ autoReturnLoops: Number((event.target as HTMLInputElement).value) });
   }
 
+  protected onAutoSaveClipsChange(event: Event): void {
+    this.settingsService.update({ autoSaveClips: (event.target as HTMLInputElement).checked });
+  }
+
   protected meterPercent(): number {
     const pct = this.soundTrigger.level() * this.meterScale;
     return pct > 100 ? 100 : pct;
