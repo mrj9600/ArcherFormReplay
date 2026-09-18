@@ -1,0 +1,47 @@
+.mic-calibration {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.meter-track {
+  position: relative;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.08);
+  // Without this, dragging the marker on a touchscreen also tries to scroll the page.
+  touch-action: none;
+  cursor: pointer;
+}
+
+.meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 6px;
+  background: #3f51b5;
+  transition: width 60ms linear;
+  pointer-events: none;
+
+  &.over {
+    background: #2e7d32;
+  }
+}
+
+.meter-threshold {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #b3261e;
+  // The track itself owns pointer handling (see mic-calibration.ts) so the whole bar is
+  // draggable, not just this thin marker - it doesn't need its own hit target.
+  pointer-events: none;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.5);
+}

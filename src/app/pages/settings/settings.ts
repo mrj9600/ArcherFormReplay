@@ -1,15 +1,16 @@
 import { Component, DestroyRef, ElementRef, OnInit, effect, inject, signal, viewChild } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { SettingsService } from '../../services/settings.service';
-import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
+import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { CameraService } from '../../services/camera.service';
 import { APP_VERSION } from '../../version';
+import { MicCalibration } from '../../components/mic-calibration/mic-calibration';
 
 const FRONT_OPTION_VALUE = '__front__';
 
 @Component({
   selector: 'app-settings',
-  imports: [MatIconModule],
+  imports: [MatIconModule, MicCalibration],
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
 })
@@ -22,7 +23,6 @@ export class Settings implements OnInit {
   protected readonly appVersion = APP_VERSION;
 
   protected readonly micError = signal<string | null>(null);
-  protected readonly meterScale = METER_DISPLAY_SCALE;
 
   protected readonly cameraSelectRef = viewChild<ElementRef<HTMLSelectElement>>('cameraSelect');
   protected readonly frontOptionValue = FRONT_OPTION_VALUE;
@@ -85,12 +85,6 @@ export class Settings implements OnInit {
     this.settingsService.update({ postRollSeconds: Number((event.target as HTMLInputElement).value) });
   }
 
-  protected onSensitivityInput(event: Event): void {
-    const value = Number((event.target as HTMLInputElement).value);
-    this.settingsService.update({ micSensitivity: value });
-    this.soundTrigger.setThreshold(value);
-  }
-
   protected onSyncClipEndsChange(event: Event): void {
     this.settingsService.update({ syncClipEnds: (event.target as HTMLInputElement).checked });
   }
@@ -101,15 +95,5 @@ export class Settings implements OnInit {
 
   protected onAutoSaveClipsChange(event: Event): void {
     this.settingsService.update({ autoSaveClips: (event.target as HTMLInputElement).checked });
-  }
-
-  protected meterPercent(): number {
-    const pct = this.soundTrigger.level() * this.meterScale;
-    return pct > 100 ? 100 : pct;
-  }
-
-  protected thresholdPercent(): number {
-    const pct = this.settingsService.settings().micSensitivity * this.meterScale;
-    return pct > 100 ? 100 : pct;
   }
 }

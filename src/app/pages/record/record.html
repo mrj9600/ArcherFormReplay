@@ -28,10 +28,7 @@
 
       <div class="record-controls">
         @if (session.isTriggerDevice() && !micUnavailable()) {
-          <div class="level-meter">
-            <span>Mic level</span>
-            <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
-          </div>
+          <app-mic-calibration />
         }
 
         @if (showTestButton()) {

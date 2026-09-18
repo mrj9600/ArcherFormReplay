@@ -4,20 +4,20 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatChipsModule } from '@angular/material/chips';
 import { CameraService } from '../../services/camera.service';
 import { RollingBufferRecorderService } from '../../services/rolling-buffer-recorder.service';
-import { METER_DISPLAY_SCALE, SoundTriggerService } from '../../services/sound-trigger.service';
+import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
 import { SessionService } from '../../services/session.service';
+import { MicCalibration } from '../../components/mic-calibration/mic-calibration';
 
 type RecordStatus = 'listening' | 'waiting-for-master' | 'coordinating' | 'manual-only' | 'capturing' | 'error';
 
 @Component({
   selector: 'app-record',
-  imports: [MatButtonModule, MatIconModule, MatProgressBarModule, MatChipsModule, NgTemplateOutlet],
+  imports: [MatButtonModule, MatIconModule, MatChipsModule, NgTemplateOutlet, MicCalibration],
   templateUrl: './record.html',
   styleUrl: './record.scss',
 })
@@ -40,7 +40,6 @@ export class Record implements OnInit {
 
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
   protected readonly status = signal<RecordStatus>(this.computeIdleStatus());
-  protected readonly meterScale = METER_DISPLAY_SCALE;
   protected readonly recordsVideo = signal(true);
 
   /** Master always gets a manual override; a slave only gets one when it's the assigned trigger device. */

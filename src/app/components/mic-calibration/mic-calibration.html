@@ -1,0 +1,10 @@
+<div class="mic-calibration">
+  <div class="meter-track" #track (pointerdown)="onPointerDown($event)" (pointermove)="onPointerMove($event)">
+    <div class="meter-fill" [class.over]="meterPercent() >= thresholdPercent()" [style.width.%]="meterPercent()"></div>
+    <div class="meter-threshold" [style.left.%]="thresholdPercent()"></div>
+  </div>
+  <p class="hint">
+    Make the release sound and watch the bar, then drag the marker to just where it peaks -
+    lower (left) is more sensitive. Sensitivity: {{ settingsService.settings().micSensitivity }}
+  </p>
+</div>

@@ -56,31 +56,16 @@
   </div>
 
   <div class="setting">
-    <label for="sensitivity">
+    <label>
       <mat-icon>graphic_eq</mat-icon>
-      Mic sensitivity threshold: {{ settingsService.settings().micSensitivity }}
+      Mic sensitivity
     </label>
 
     @if (micError()) {
       <p class="hint error">Couldn't access the microphone to calibrate: {{ micError() }}</p>
     } @else {
-      <div class="meter-track">
-        <div class="meter-fill" [class.over]="meterPercent() >= thresholdPercent()" [style.width.%]="meterPercent()"></div>
-        <div class="meter-threshold" [style.left.%]="thresholdPercent()"></div>
-      </div>
-      <p class="hint">Make the release sound (or something similar) and watch the bar. The red line is the trigger threshold — the bar needs to cross it to fire.</p>
+      <app-mic-calibration />
     }
-
-    <input
-      id="sensitivity"
-      type="range"
-      min="0.005"
-      max="0.3"
-      step="0.005"
-      [value]="settingsService.settings().micSensitivity"
-      (input)="onSensitivityInput($event)"
-    />
-    <p class="hint">Lower = more sensitive (triggers on quieter sounds).</p>
   </div>
 
   <div class="setting">
