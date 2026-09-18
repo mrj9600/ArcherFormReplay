@@ -5,6 +5,20 @@
   height: 100%;
 }
 
+.record-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.record-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .preview-wrap {
   position: relative;
   background: #000;
@@ -81,5 +95,33 @@
 
   p {
     margin: 0;
+  }
+}
+
+// See app.scss for why this is gated on height, not width: a landscape phone is short, not
+// narrow, so trading some of its (plentiful) width back for height is worth it here too - the
+// fixed max-height on the preview was tuned for a portrait layout where height is the ample
+// dimension, and badly undersizes it once height becomes the scarce one.
+@media (orientation: landscape) and (max-height: 500px) {
+  .record-body {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .preview-wrap {
+    flex: 1 1 auto;
+    max-height: none;
+    aspect-ratio: auto;
+  }
+
+  .no-preview {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .record-controls {
+    flex: 0 0 auto;
+    width: 11rem;
+    justify-content: center;
   }
 }

@@ -1,44 +1,46 @@
 <div class="review-page">
   @if (clipStore.clipSet(); as clipSet) {
-    @if (clipSet.note) {
-      <p class="warning">{{ clipSet.note }}</p>
-    }
+    <div class="review-media">
+      @if (clipSet.note) {
+        <p class="warning">{{ clipSet.note }}</p>
+      }
 
-    <div class="clip-grid" [style.--clip-count]="clipSet.clips.length">
-      @for (clip of clipSet.clips; track clip.url; let i = $index) {
-        <div class="clip-tile">
-          <div class="clip-tile-header">
-            <span class="clip-label">
-              {{ clip.deviceLabel }}
-              @if (clipDurations()[i]; as duration) {
-                <span class="clip-duration">({{ formatTime(duration) }})</span>
-              }
-            </span>
-            <a
-              class="download-link"
-              [href]="clip.url"
-              [download]="downloadFilename(clip, i)"
-              title="Download this clip"
-            >
-              <mat-icon>download</mat-icon>
-            </a>
+      <div class="clip-grid" [style.--clip-count]="clipSet.clips.length">
+        @for (clip of clipSet.clips; track clip.url; let i = $index) {
+          <div class="clip-tile">
+            <div class="clip-tile-header">
+              <span class="clip-label">
+                {{ clip.deviceLabel }}
+                @if (clipDurations()[i]; as duration) {
+                  <span class="clip-duration">({{ formatTime(duration) }})</span>
+                }
+              </span>
+              <a
+                class="download-link"
+                [href]="clip.url"
+                [download]="downloadFilename(clip, i)"
+                title="Download this clip"
+              >
+                <mat-icon>download</mat-icon>
+              </a>
+            </div>
+            <video #player [src]="clip.url" playsinline class="player" [style.aspect-ratio]="aspectRatioFor(i)"></video>
           </div>
-          <video #player [src]="clip.url" playsinline class="player" [style.aspect-ratio]="aspectRatioFor(i)"></video>
+        }
+      </div>
+
+      @if (!clipsReady()) {
+        <p class="hint">Preparing clip{{ clipSet.clips.length > 1 ? 's' : '' }}…</p>
+      }
+
+      @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
+        <div class="auto-return-banner">
+          <mat-icon>replay</mat-icon>
+          <span>Returning to Record after play {{ loopsCompleted() + 1 }} of {{ loopsConfigured() }}</span>
+          <button mat-button (click)="cancelAutoReturn()">Cancel</button>
         </div>
       }
     </div>
-
-    @if (!clipsReady()) {
-      <p class="hint">Preparing clip{{ clipSet.clips.length > 1 ? 's' : '' }}…</p>
-    }
-
-    @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
-      <div class="auto-return-banner">
-        <mat-icon>replay</mat-icon>
-        <span>Returning to Record after play {{ loopsCompleted() + 1 }} of {{ loopsConfigured() }}</span>
-        <button mat-button (click)="cancelAutoReturn()">Cancel</button>
-      </div>
-    }
 
     <div class="controls" [class.disabled]="!clipsReady()">
       <div class="timeline">

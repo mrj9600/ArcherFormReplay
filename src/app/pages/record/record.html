@@ -8,22 +8,42 @@
       }
     </div>
   } @else {
-    @if (recordsVideo()) {
-      <div class="preview-wrap">
-        <video #preview autoplay playsinline muted class="preview"></video>
-        <mat-chip-set class="status-chip">
-          <ng-container [ngTemplateOutlet]="statusChip" />
-        </mat-chip-set>
+    <div class="record-body">
+      @if (recordsVideo()) {
+        <div class="preview-wrap">
+          <video #preview autoplay playsinline muted class="preview"></video>
+          <mat-chip-set class="status-chip">
+            <ng-container [ngTemplateOutlet]="statusChip" />
+          </mat-chip-set>
+        </div>
+      } @else {
+        <div class="no-preview">
+          <mat-icon>videocam_off</mat-icon>
+          <p>Not recording video on this device (coordinating only).</p>
+          <mat-chip-set>
+            <ng-container [ngTemplateOutlet]="statusChip" />
+          </mat-chip-set>
+        </div>
+      }
+
+      <div class="record-controls">
+        @if (session.isTriggerDevice() && !micUnavailable()) {
+          <div class="level-meter">
+            <span>Mic level</span>
+            <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
+          </div>
+        }
+
+        @if (showTestButton()) {
+          <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
+            <mat-icon>bolt</mat-icon>
+            Manual trigger
+          </button>
+        } @else {
+          <p class="hint">This device is a camera angle in the session — the clip is captured automatically when the trigger device detects a release.</p>
+        }
       </div>
-    } @else {
-      <div class="no-preview">
-        <mat-icon>videocam_off</mat-icon>
-        <p>Not recording video on this device (coordinating only).</p>
-        <mat-chip-set>
-          <ng-container [ngTemplateOutlet]="statusChip" />
-        </mat-chip-set>
-      </div>
-    }
+    </div>
 
     <ng-template #statusChip>
       @switch (status()) {
@@ -52,21 +72,5 @@
         }
       }
     </ng-template>
-
-    @if (session.isTriggerDevice() && !micUnavailable()) {
-      <div class="level-meter">
-        <span>Mic level</span>
-        <mat-progress-bar mode="determinate" [value]="soundTrigger.level() * meterScale > 100 ? 100 : soundTrigger.level() * meterScale"></mat-progress-bar>
-      </div>
-    }
-
-    @if (showTestButton()) {
-      <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
-        <mat-icon>bolt</mat-icon>
-        Manual trigger
-      </button>
-    } @else {
-      <p class="hint">This device is a camera angle in the session — the clip is captured automatically when the trigger device detects a release.</p>
-    }
   }
 </div>

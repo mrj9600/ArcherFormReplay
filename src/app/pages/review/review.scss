@@ -5,6 +5,14 @@
   height: 100%;
 }
 
+.review-media {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .clip-grid {
   display: flex;
   flex-wrap: wrap;
@@ -158,5 +166,28 @@
     font-size: 2.5rem;
     height: 2.5rem;
     width: 2.5rem;
+  }
+}
+
+// See app.scss for why this is gated on height, not width. With the controls sidebar moved
+// beside the clips instead of below them, the clip grid gets the review page's full height back,
+// so the player's height cap is raised to actually use it.
+@media (orientation: landscape) and (max-height: 500px) {
+  .review-page {
+    flex-direction: row;
+  }
+
+  .review-media {
+    overflow-y: auto;
+  }
+
+  .player {
+    height: 85vh;
+  }
+
+  .controls {
+    flex: 0 0 auto;
+    width: 13rem;
+    overflow-y: auto;
   }
 }

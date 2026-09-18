@@ -31,6 +31,13 @@
   }
 }
 
+.app-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .app-content {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -39,6 +46,7 @@
   padding-top: calc(1rem + env(safe-area-inset-top));
   padding-bottom: calc(1rem + env(safe-area-inset-bottom));
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .app-nav {
@@ -71,5 +79,36 @@
 
   &.active {
     color: var(--mat-sys-primary, #3f51b5);
+  }
+}
+
+// A phone rotated to landscape is short, not narrow - the bottom nav bar eating a full-width
+// strip off the bottom costs a much bigger share of the (already scarce) vertical space than it
+// does in portrait. Moving it to a side rail instead trades a little width (plentiful in
+// landscape) back for height (the scarce dimension here). Gated on max-height, not max-width, so
+// a landscape tablet/laptop - which has plenty of height to spare - keeps the normal bottom nav.
+@media (orientation: landscape) and (max-height: 500px) {
+  .app-body {
+    flex-direction: row;
+  }
+
+  .app-content {
+    padding-bottom: 1rem;
+  }
+
+  .app-nav {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.25rem;
+    border-top: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.12);
+    padding: 0.5rem 0;
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .app-nav-link {
+    flex: 0 0 auto;
+    width: 100%;
+    padding: 0.6rem 0.5rem;
   }
 }

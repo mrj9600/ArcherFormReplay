@@ -5,19 +5,21 @@
   </div>
 }
 
-<main class="app-content">
-  <router-outlet />
-</main>
+<div class="app-body">
+  <main class="app-content">
+    <router-outlet />
+  </main>
 
-<nav class="app-nav">
-  @for (link of navLinks; track link.path) {
-    <a
-      class="app-nav-link"
-      [routerLink]="link.path"
-      routerLinkActive="active"
-    >
-      <mat-icon>{{ link.icon }}</mat-icon>
-      <span>{{ link.label }}</span>
-    </a>
-  }
-</nav>
+  <nav class="app-nav">
+    @for (link of navLinks; track link.path) {
+      <a
+        class="app-nav-link"
+        [routerLink]="link.path"
+        routerLinkActive="active"
+      >
+        <mat-icon>{{ link.icon }}</mat-icon>
+        <span>{{ link.label }}</span>
+      </a>
+    }
+  </nav>
+</div>
