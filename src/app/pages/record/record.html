@@ -9,22 +9,22 @@
     </div>
   } @else {
     <div class="record-body">
-      @if (recordsVideo()) {
-        <div class="preview-wrap">
-          <video #preview autoplay playsinline muted class="preview"></video>
-          <mat-chip-set class="status-chip">
-            <ng-container [ngTemplateOutlet]="statusChip" />
-          </mat-chip-set>
-        </div>
-      } @else {
-        <div class="no-preview">
-          <mat-icon>videocam_off</mat-icon>
-          <p>Not recording video on this device (coordinating only).</p>
-          <mat-chip-set>
-            <ng-container [ngTemplateOutlet]="statusChip" />
-          </mat-chip-set>
-        </div>
-      }
+      <div class="media-column">
+        <mat-chip-set class="status-chip">
+          <ng-container [ngTemplateOutlet]="statusChip" />
+        </mat-chip-set>
+
+        @if (recordsVideo()) {
+          <div class="preview-wrap">
+            <video #preview autoplay playsinline muted class="preview"></video>
+          </div>
+        } @else {
+          <div class="no-preview">
+            <mat-icon>videocam_off</mat-icon>
+            <p>Not recording video on this device (coordinating only).</p>
+          </div>
+        }
+      </div>
 
       <div class="record-controls">
         @if (session.isTriggerDevice() && !micUnavailable()) {
