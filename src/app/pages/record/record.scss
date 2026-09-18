@@ -13,12 +13,6 @@
   min-height: 0;
 }
 
-.media-column {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
 .record-controls {
   display: flex;
   flex-direction: column;
@@ -102,11 +96,6 @@
   .record-body {
     flex-direction: row;
     align-items: stretch;
-  }
-
-  .media-column {
-    flex: 1 1 auto;
-    min-width: 0;
   }
 
   .preview-wrap {
