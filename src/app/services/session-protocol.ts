@@ -14,6 +14,9 @@ export const DEVICE_STATE_LABELS: Record<DeviceState, string> = {
   error: 'Failed',
 };
 
+/** Free-form numbers/strings about how a clip was made, shown in the timing debug readouts. */
+export type ClipDebug = Record<string, string | number>;
+
 export interface WelcomeMessage {
   type: 'welcome';
   settings: AppSettings;
@@ -54,6 +57,11 @@ export interface ClipMessage {
   mimeType: string;
   /** Sent as a Blob; arrives as an ArrayBuffer after the wire format round-trip. */
   data: Blob | ArrayBuffer;
+  /** Time of the clip's first frame on the master's epoch clock (decimal string), when the
+   *  sender knows it exactly - lets Review line clips up by real time. */
+  startEpochMs?: string;
+  /** JSON-encoded ClipDebug (a string so the wire format can't mangle the numbers). */
+  debug?: string;
 }
 
 /** Master -> slave: the clip for this trigger arrived intact. */

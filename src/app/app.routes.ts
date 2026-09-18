@@ -7,5 +7,6 @@ export const routes: Routes = [
   { path: 'review', loadComponent: () => import('./pages/review/review').then((m) => m.Review) },
   { path: 'session', loadComponent: () => import('./pages/session/session').then((m) => m.Session) },
   { path: 'settings', loadComponent: () => import('./pages/settings/settings').then((m) => m.Settings) },
+  { path: 'sync-clock', loadComponent: () => import('./pages/sync-clock/sync-clock').then((m) => m.SyncClock) },
   { path: '**', redirectTo: 'home' },
 ];

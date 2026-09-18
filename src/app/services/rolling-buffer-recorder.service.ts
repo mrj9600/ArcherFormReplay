@@ -1,49 +1,151 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { pickSupportedMimeType } from './media-format';
 import { trimClip } from './clip-trimmer';
+import { FrameRecorder, RecorderStats, TimingSource } from './frame-recorder';
+import type { ClipDebug } from './session-protocol';
+import { SettingsService } from './settings.service';
 import { epochNow } from './time';
 
 /** Extra footage recorded past the end of the requested clip window before cutting, so the
- *  window's end is always comfortably inside data the encoder has actually flushed - encoders lag
+ *  window's end is always comfortably inside data the recorder has actually flushed - encoders lag
  *  the live stream by some frames, and cutting right at the edge risks a clip that's slightly
  *  short at the end. */
 const TAIL_MARGIN_MS = 500;
 
 export interface ExtractClipHooks {
-  /** Called once the footage for the window has been captured and flushed, right before the
-   *  (potentially slow) trim starts - the recorder is no longer needed after this point. */
+  /** Called once the footage for the window has been captured, right before it's cut into a
+   *  clip - the recorder is no longer needed after this point. */
   onClipping?: () => void;
 }
 
+export interface ExtractedClip {
+  blob: Blob;
+  /** Epoch ms (this device's clock) of the clip's first frame - exact for precise capture, null
+   *  for the MediaRecorder fallback, whose trimmed start can't be tied to a moment that closely. */
+  startEpochMs: number | null;
+  /** Timing debug numbers about how this clip was cut. */
+  debug: ClipDebug;
+}
+
+/** How this device is timing its footage: 'capture-time' and 'smoothed-arrival' are the precise
+ *  frame recorder (see TimingSource); 'basic' is the MediaRecorder fallback. */
+export type RecorderTiming = TimingSource | 'basic';
+
 /**
- * Records continuously from start() in a single MediaRecorder run (no periodic restarts) so a
- * clip can be extracted spanning from *before* a trigger to *after* it. Callers start it when a
- * shot is about to be possible and stop it once the clip has been captured - restarting it per
- * shot keeps the history (and therefore the trim cost) short, instead of letting one recording
- * grow for a whole session.
+ * Records the camera from start() until stop(), and cuts a clip around a trigger time on demand.
+ * Callers start it when a shot is about to be possible and stop it once the clip has been captured,
+ * so history (and cutting cost) stays short.
  *
- * Every timestamp here is on the epoch clock (time.ts): the moment recording actually began is
- * captured when the recorder reports it started, and a trigger's time is compared against that to
- * find where in the recording it falls - the container's own timeline starts at 0 at that moment.
+ * Preferred: FrameRecorder (WebCodecs) - every frame is stamped with the epoch time it was
+ * captured at, and clips are cut on exact frame boundaries. Fallback, where that isn't available
+ * or is turned off: a single MediaRecorder run trimmed with mediabunny, whose recording start
+ * can only be located to within a frame or two.
  *
- * MediaRecorder is started without a timeslice, so it only hands over data when explicitly asked
- * via requestData() - extractClip() does that on demand, then hands the recording so far (one
- * continuous, always-valid container) to clip-trimmer.ts, which uses mediabunny (WebCodecs) to cut
- * the exact [start, end) window out of it.
+ * All timestamps are on the epoch clock (time.ts).
  */
 @Injectable({ providedIn: 'root' })
 export class RollingBufferRecorderService {
+  private readonly settingsService = inject(SettingsService);
+
   readonly isRecording = signal(false);
   readonly mimeTypeUsed = signal('');
+  /** How the current recording is being timed, once known (null when not recording). */
+  readonly timing = signal<RecorderTiming | null>(null);
+  /** Which recorder is in use: the precise frame recorder, or the plain MediaRecorder fallback. */
+  readonly mode = signal<'precise' | 'media-recorder' | null>(null);
+  /** Why the MediaRecorder fallback is in use, when it is. */
+  readonly fallbackReason = signal('');
+  /** Live recorder numbers for the timing debug readout (precise capture only), refreshed twice a second. */
+  readonly stats = signal<RecorderStats | null>(null);
+
+  private frameRecorder: FrameRecorder | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
 
   private recorder: MediaRecorder | null = null;
   private mimeType = '';
   private chunks: Blob[] = [];
-  /** Epoch ms at which the current recording began. */
+  /** MediaRecorder fallback only: epoch ms at which the current recording began. */
   private recordingStartedAt = 0;
 
   start(stream: MediaStream): void {
     this.stop();
+    this.isRecording.set(true);
+    this.fallbackReason.set('');
+
+    if (!this.settingsService.settings().preciseCapture) {
+      this.fallbackReason.set('precise capture is turned off in Settings');
+    } else if (!FrameRecorder.isSupported()) {
+      this.fallbackReason.set('this browser has no WebCodecs/MediaStreamTrackProcessor');
+    }
+
+    if (!this.fallbackReason()) {
+      const frameRecorder = new FrameRecorder();
+      this.frameRecorder = frameRecorder;
+      this.mode.set('precise');
+      frameRecorder.start(stream, () => this.settingsService.settings().videoTimingOffsetMs);
+      this.statsTimer = setInterval(() => this.stats.set(frameRecorder.getStats()), 500);
+      void frameRecorder.ready.then((ok) => {
+        if (this.frameRecorder !== frameRecorder) return; // stopped or restarted meanwhile
+        if (ok) {
+          this.mimeTypeUsed.set(frameRecorder.mimeType);
+          this.timing.set(frameRecorder.timingSource ?? 'smoothed-arrival');
+        } else {
+          // This device can't do precise capture (no encoder for it, etc.) - fall back rather
+          // than leave it unable to record at all.
+          this.frameRecorder = null;
+          frameRecorder.stop();
+          this.fallbackReason.set('precise capture failed to start on this device (no usable encoder?)');
+          this.startMediaRecorder(stream);
+        }
+      });
+      return;
+    }
+    this.startMediaRecorder(stream);
+  }
+
+  stop(): void {
+    this.frameRecorder?.stop();
+    this.frameRecorder = null;
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+    this.stats.set(null);
+    if (this.recorder && this.recorder.state !== 'inactive') {
+      this.recorder.ondataavailable = null;
+      this.recorder.onstart = null;
+      this.recorder.stop();
+    }
+    this.recorder = null;
+    this.chunks = [];
+    this.isRecording.set(false);
+    this.timing.set(null);
+    this.mode.set(null);
+  }
+
+  /**
+   * Waits until the post-roll after the trigger has actually been recorded, then cuts the
+   * recording down to [trigger - preRollSeconds, trigger + postRollSeconds]. `triggerTimestamp` is
+   * on the epoch clock. If the recording hadn't been running long enough to have that much pre-roll
+   * yet, the clip starts as early as it can rather than failing - shorter than requested, never
+   * corrupted.
+   */
+  async extractClip(
+    triggerTimestamp: number,
+    preRollSeconds: number,
+    postRollSeconds: number,
+    hooks: ExtractClipHooks = {},
+  ): Promise<ExtractedClip> {
+    const windowStart = triggerTimestamp - preRollSeconds * 1000;
+    const windowEnd = triggerTimestamp + postRollSeconds * 1000;
+
+    if (this.frameRecorder) {
+      const clip = await this.frameRecorder.extract(windowStart, windowEnd, hooks.onClipping);
+      this.mimeTypeUsed.set(clip.blob.type);
+      return { blob: clip.blob, startEpochMs: clip.startEpochMs, debug: { mode: 'precise (WebCodecs)', ...clip.debug } as unknown as ClipDebug };
+    }
+    return this.extractWithMediaRecorder(windowStart, windowEnd, hooks);
+  }
+
+  private startMediaRecorder(stream: MediaStream): void {
     this.mimeType = pickSupportedMimeType();
     this.mimeTypeUsed.set(this.mimeType || 'video/webm');
     this.chunks = [];
@@ -63,36 +165,15 @@ export class RollingBufferRecorderService {
     // No timeslice: data only flushes to ondataavailable when we explicitly call
     // requestData() (see flush()) or on stop() - nothing to do in the idle case in between.
     recorder.start();
-    this.isRecording.set(true);
+    this.mode.set('media-recorder');
+    this.timing.set('basic');
   }
 
-  stop(): void {
-    if (this.recorder && this.recorder.state !== 'inactive') {
-      this.recorder.ondataavailable = null;
-      this.recorder.onstart = null;
-      this.recorder.stop();
-    }
-    this.recorder = null;
-    this.chunks = [];
-    this.isRecording.set(false);
-  }
-
-  /**
-   * Waits until postRollSeconds (plus a small safety margin) after the trigger has actually been
-   * recorded, then trims the recording so far down to exactly
-   * [trigger - preRollSeconds, trigger + postRollSeconds]. `triggerTimestamp` is on the epoch
-   * clock. If the recording hadn't been running long enough to have that much pre-roll yet, the
-   * clip starts as early as it can rather than failing - shorter than requested, never corrupted.
-   */
-  async extractClip(
-    triggerTimestamp: number,
-    preRollSeconds: number,
-    postRollSeconds: number,
-    hooks: ExtractClipHooks = {},
-  ): Promise<Blob> {
-    const windowStart = triggerTimestamp - preRollSeconds * 1000;
-    const windowEnd = triggerTimestamp + postRollSeconds * 1000;
-
+  private async extractWithMediaRecorder(
+    windowStart: number,
+    windowEnd: number,
+    hooks: ExtractClipHooks,
+  ): Promise<ExtractedClip> {
     const waitMs = windowEnd + TAIL_MARGIN_MS - epochNow();
     if (waitMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -110,13 +191,14 @@ export class RollingBufferRecorderService {
     try {
       // A hard timeout, not just a try/catch: a trim that hangs (rather than rejects) would
       // otherwise leave the caller awaiting forever, stuck in "clipping" indefinitely.
-      return await Promise.race([
+      const blob = await Promise.race([
         trimClip(fullBlob, startSec, endSec, mimeType),
         new Promise<Blob>((_, reject) => setTimeout(() => reject(new Error('Clip trim timed out')), 20_000)),
       ]);
+      return { blob, startEpochMs: null, debug: { mode: 'MediaRecorder', timing: 'basic', trimmed: 'yes' } };
     } catch (err) {
       console.error('Clip trim failed, using untrimmed capture instead', err);
-      return fullBlob;
+      return { blob: fullBlob, startEpochMs: null, debug: { mode: 'MediaRecorder', timing: 'basic', trimmed: 'FAILED (untrimmed)' } };
     }
   }
 

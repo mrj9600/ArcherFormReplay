@@ -335,3 +335,30 @@
     display: none;
   }
 }
+
+.timing-debug {
+  font-size: 0.7rem;
+  color: rgba(0, 0, 0, 0.7);
+  margin-top: 0.5rem;
+
+  summary {
+    cursor: pointer;
+  }
+
+  dl {
+    margin: 0.35rem 0 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.15rem 0.6rem;
+  }
+
+  dt {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+}

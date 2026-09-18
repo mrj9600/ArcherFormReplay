@@ -5,7 +5,7 @@ export interface AppSettings {
   postRollSeconds: number;
   /** Peak amplitude (0-1) the mic must exceed to count as a release. */
   micSensitivity: number;
-  /** When multiple clips have different lengths, slow the shorter ones down so every clip ends at the same time. */
+  /** Line multi-camera clips up in time on Review (by each clip's real start time when known, else by their ends) instead of all starting at 0. */
   syncClipEnds: boolean;
   /** What happens after a shot: 0 = off (skip Review, stay on Record and re-arm),
    *  AUTO_RETURN_MANUAL = open Review and go back manually, 1-5 = open Review and return to
@@ -13,7 +13,14 @@ export interface AppSettings {
   autoReturnLoops: number;
   /** Also download each clip straight to the device as soon as it's captured, independent of what happens after the shot (see autoReturnLoops). */
   autoSaveClips: boolean;
+  /** Time frames by their real capture time and cut clips on exact frame boundaries (WebCodecs), where the browser supports it. Local to this device. */
+  preciseCapture: boolean;
+  /** Local to this device: shifts this camera's frames earlier (positive) on the shared timeline, to cancel a constant camera/encoder delay measured with the sync clock. */
+  videoTimingOffsetMs: number;
 }
+
+/** Settings that describe this device's own hardware and are never overwritten by the master's. */
+export const DEVICE_LOCAL_SETTINGS = ['preciseCapture', 'videoTimingOffsetMs'] as const;
 
 export const AUTO_RETURN_MANUAL = -1;
 
@@ -24,6 +31,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   syncClipEnds: true,
   autoReturnLoops: AUTO_RETURN_MANUAL,
   autoSaveClips: false,
+  preciseCapture: true,
+  videoTimingOffsetMs: 0,
 };
 
 const STORAGE_KEY = 'archer-form-replay.settings';

@@ -1,9 +1,16 @@
-import { Component, ElementRef, effect, inject, signal, viewChild, viewChildren } from '@angular/core';
+import { Component, DestroyRef, ElementRef, computed, effect, inject, signal, viewChild, viewChildren } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { ClipStoreService, StoredClip } from '../../services/clip-store.service';
 import { SettingsService } from '../../services/settings.service';
+
+/** Video-vs-clock error beyond which a video is re-seeked instead of gently sped up/slowed down. */
+const HARD_SEEK_THRESHOLD_SEC = 0.25;
+/** Time constant (seconds) of the speed correction that pulls a drifting video back to the shared clock. */
+const DRIFT_CORRECTION_SEC = 0.5;
+/** Largest speed correction, as a fraction of the current playback rate. */
+const MAX_RATE_CORRECTION = 0.15;
 
 @Component({
   selector: 'app-review',
@@ -26,24 +33,55 @@ export class Review {
   protected readonly autoReturnCancelled = signal(false);
   protected readonly loopsCompleted = signal(0);
 
-  /** The longest clip's duration - the scrub slider's range, and the shared "session timeline"
-   *  every clip is positioned against (see playFrom()/seekTo()). */
+  /** The shared timeline's length: the latest any clip ends, counting each clip's start delay. */
   protected readonly timelineDuration = signal(0);
-  /** Current position on that shared timeline, in seconds. Driven by the longest clip's own
-   *  currentTime while playing (see setupTimelineTracking()), since that clip always starts at
-   *  session time 0 with no delay - and set directly while the user is scrubbing or restarting. */
+  /** Current position on the shared timeline, in seconds. While playing this is driven by the
+   *  shared clock (see tick()), not by any one video, so no clip's own timing is trusted over another's. */
   protected readonly timelinePosition = signal(0);
   /** Each clip's own real duration, in clipSet.clips order - shown next to its device label. */
   protected readonly clipDurations = signal<number[]>([]);
+  /** How far into the shared timeline each clip starts, in seconds (see computeDelays()). */
+  protected readonly clipDelays = signal<number[]>([]);
   /** Each clip's own width/height ratio, in clipSet.clips order - sizes its tile to fit the
    *  actual footage instead of a fixed box with letterboxing, and lets several tiles sit
    *  side by side once each is only as wide as its own content needs. */
   protected readonly clipAspectRatios = signal<number[]>([]);
 
+  /** How the clips were lined up, for the timing debug readout. */
+  protected readonly alignmentMode = signal<'off' | 'frame-timestamps' | 'ends'>('off');
+  /** Timing debug: each playing video's error against the shared clock, in ms (+ = video ahead), refreshed ~4x/s. */
+  protected readonly driftMs = signal<number[]>([]);
+
+  protected readonly debugRows = computed(() => {
+    const clipSet = this.clipStore.clipSet();
+    if (!clipSet) return [];
+    const durations = this.clipDurations();
+    const delays = this.clipDelays();
+    const drifts = this.driftMs();
+    const starts = clipSet.clips.map((c) => c.startEpochMs);
+    const earliest = starts.every((s) => s !== null) ? Math.min(...(starts as number[])) : null;
+    const rows: { key: string; value: string }[] = [{ key: 'Alignment', value: this.alignmentMode() }];
+    clipSet.clips.forEach((clip, i) => {
+      const parts = [
+        `dur ${((durations[i] ?? 0) * 1000).toFixed(0)}ms`,
+        `delay ${((delays[i] ?? 0) * 1000).toFixed(1)}ms`,
+        earliest !== null && clip.startEpochMs !== null ? `start +${(clip.startEpochMs - earliest).toFixed(1)}ms` : 'start unknown',
+        `drift ${drifts[i] !== undefined ? drifts[i].toFixed(1) : '-'}ms`,
+      ];
+      if (clip.debug) parts.push(...Object.entries(clip.debug).map(([k, v]) => `${k}=${typeof v === 'number' ? Number(v.toFixed(2)) : v}`));
+      rows.push({ key: clip.deviceLabel, value: parts.join(' | ') });
+    });
+    return rows;
+  });
+
   /** Bumped for every new clip set so a slow in-flight prepare() for a stale set can detect it's obsolete and stop. */
   private generation = 0;
-  private endedIndices = new Set<number>();
-  private pendingStartTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Bumped by every play/pause/scrub so a play that was still waiting on its seeks can tell it was superseded. */
+  private playToken = 0;
+  private rafHandle: number | null = null;
+  private clockBasePosition = 0;
+  private clockBaseWall = 0;
+  private lastDriftPublish = 0;
 
   constructor() {
     effect(() => {
@@ -52,7 +90,7 @@ export class Review {
       if (!clipSet || videos.length === 0 || videos.length !== clipSet.clips.length) return;
 
       const generation = ++this.generation;
-      this.clearPendingStartTimers();
+      this.stopClock();
       this.clipsReady.set(false);
       this.isPlaying.set(false);
       this.autoReturnCancelled.set(false);
@@ -74,11 +112,18 @@ export class Review {
       if (!select) return;
       select.value = String(rate);
     });
+
+    inject(DestroyRef).onDestroy(() => this.stopClock());
   }
 
   protected setPlaybackRate(rate: number): void {
+    if (this.isPlaying()) {
+      // Re-anchor the shared clock so the position doesn't jump when its speed changes.
+      this.clockBasePosition = this.currentPosition();
+      this.clockBaseWall = performance.now();
+    }
     this.playbackRate.set(rate);
-    this.applyRates();
+    if (!this.isPlaying()) this.applyRates();
   }
 
   protected onRateSelectChange(event: Event): void {
@@ -87,25 +132,34 @@ export class Review {
 
   /** Resumes from wherever the shared timeline currently sits (e.g. after a pause or a scrub). */
   protected playAll(): void {
-    this.playFrom(this.timelinePosition());
+    void this.playFrom(this.timelinePosition());
   }
 
   protected pauseAll(): void {
-    this.clearPendingStartTimers();
+    const position = this.currentPosition();
+    this.playToken++;
+    this.stopClock();
     this.isPlaying.set(false);
     for (const ref of this.videoRefs()) ref.nativeElement.pause();
+    this.timelinePosition.set(position);
+    // Pausing leaves each video wherever its own decoder happened to stop; re-seeking them all
+    // to the exact shared position makes the paused frames line up.
+    this.seekTo(position);
   }
 
   protected restartAll(): void {
-    this.playFrom(0);
+    void this.playFrom(0);
   }
 
-  /** Scrub slider handler - pauses (scrubbing while playing would otherwise fight the slider's
-   *  own timeupdate-driven updates) and repositions every clip to the dragged-to timeline point. */
+  /** Scrub slider handler - pauses (scrubbing while playing would otherwise fight the shared
+   *  clock) and repositions every clip to the dragged-to timeline point. */
   protected onScrubInput(event: Event): void {
     if (!this.clipsReady()) return;
     const value = Number((event.target as HTMLInputElement).value);
-    this.pauseAll();
+    this.playToken++;
+    this.stopClock();
+    this.isPlaying.set(false);
+    for (const ref of this.videoRefs()) ref.nativeElement.pause();
     this.timelinePosition.set(value);
     this.seekTo(value);
   }
@@ -160,13 +214,16 @@ export class Review {
     await Promise.all(videos.map((video) => this.waitForDuration(video)));
     if (generation !== this.generation) return; // a newer clip set has since arrived
 
+    const { durations } = this.durationsAndMax();
+    const delays = this.computeDelays(durations);
+    this.clipDelays.set(delays);
+    this.timelineDuration.set(Math.max(0, ...durations.map((d, i) => d + delays[i])));
+    this.timelinePosition.set(0);
     this.applyRates();
-    this.setupEndedListeners(generation);
-    this.setupTimelineTracking();
-    this.clipDurations.set(this.durationsAndMax().durations);
+    this.clipDurations.set(durations);
     this.clipAspectRatios.set(videos.map((v) => (v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 16 / 9)));
     this.clipsReady.set(true);
-    this.playFrom(0);
+    void this.playFrom(0);
   }
 
   /** Resolves once `video.duration` is a real finite number. MediaRecorder's raw streaming
@@ -212,12 +269,7 @@ export class Review {
     for (const ref of this.videoRefs()) ref.nativeElement.playbackRate = rate;
   }
 
-  private clearPendingStartTimers(): void {
-    for (const timer of this.pendingStartTimers) clearTimeout(timer);
-    this.pendingStartTimers = [];
-  }
-
-  /** Every clip's real duration, and the longest one - the shared "session timeline" length. */
+  /** Every clip's real duration, and the longest one. */
   private durationsAndMax(): { videos: HTMLVideoElement[]; durations: number[]; maxDuration: number } {
     const videos = this.videoRefs().map((ref) => ref.nativeElement);
     const durations = videos.map((v) => (isFinite(v.duration) && v.duration > 0 ? v.duration : 0));
@@ -225,77 +277,159 @@ export class Review {
     return { videos, durations, maxDuration };
   }
 
-  /** How far into the shared timeline a clip of this duration starts, when sync is enabled -
-   *  0 for the longest clip (and always, when sync is off), matching playFrom()/seekTo(). */
-  private startDelaySeconds(duration: number, maxDuration: number, clipCount: number): number {
-    const sync = this.settingsService.settings().syncClipEnds;
-    return sync && clipCount > 1 ? Math.max(0, maxDuration - duration) : 0;
+  /**
+   * How far into the shared timeline each clip starts. With sync on, clips whose real start times
+   * are all known (precise capture) are placed by those times - so every camera shows the same
+   * instant at the same timeline position. Otherwise it falls back to lining up the clips' ends,
+   * which is only as good as their cut ends were. With sync off, every clip starts at 0.
+   */
+  private computeDelays(durations: number[]): number[] {
+    const clips = this.clipStore.clipSet()?.clips ?? [];
+    const zeros = durations.map(() => 0);
+    if (!this.settingsService.settings().syncClipEnds || clips.length < 2) {
+      this.alignmentMode.set('off');
+      return zeros;
+    }
+    const starts = clips.map((c) => c.startEpochMs);
+    if (starts.every((s): s is number => s !== null)) {
+      const earliest = Math.min(...starts);
+      this.alignmentMode.set('frame-timestamps');
+      return starts.map((s) => (s - earliest) / 1000);
+    }
+    const max = Math.max(...durations, 0);
+    this.alignmentMode.set('ends');
+    return durations.map((d) => Math.max(0, max - (d || max)));
   }
 
-  /** Starts (or resumes) playback from a given point on the shared timeline. A clip whose
-   *  synced start delay hasn't been reached yet is positioned at its own 0 and scheduled to
-   *  start once the remaining delay elapses, exactly as a fresh playFrom(0) does. */
-  private playFrom(sessionSeconds: number): void {
+  private currentPosition(): number {
+    if (!this.isPlaying() || this.rafHandle === null) return this.timelinePosition();
+    return this.clockBasePosition + ((performance.now() - this.clockBaseWall) / 1000) * this.playbackRate();
+  }
+
+  private stopClock(): void {
+    if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
+    this.rafHandle = null;
+  }
+
+  /** Repositions every clip to a point on the shared timeline without playing. */
+  private seekTo(sessionSeconds: number): void {
+    const { videos, durations } = this.durationsAndMax();
+    const delays = this.clipDelays();
+    videos.forEach((video, i) => {
+      video.currentTime = Math.min(Math.max(sessionSeconds - (delays[i] ?? 0), 0), durations[i]);
+    });
+  }
+
+  /** Like seekTo(), but resolves once every video has actually finished seeking - so playback can
+   *  begin with all of them already in place instead of catching up afterwards. */
+  private seekAndWait(sessionSeconds: number): Promise<void> {
+    const { videos, durations } = this.durationsAndMax();
+    const delays = this.clipDelays();
+    return Promise.all(
+      videos.map(
+        (video, i) =>
+          new Promise<void>((resolve) => {
+            const target = Math.min(Math.max(sessionSeconds - (delays[i] ?? 0), 0), durations[i]);
+            if (Math.abs(video.currentTime - target) < 0.001 && video.readyState >= 2) {
+              resolve();
+              return;
+            }
+            const done = () => {
+              video.removeEventListener('seeked', done);
+              resolve();
+            };
+            video.addEventListener('seeked', done);
+            setTimeout(done, 800);
+            video.currentTime = target;
+          }),
+      ),
+    ).then(() => undefined);
+  }
+
+  /**
+   * Starts (or resumes) playback from a point on the shared timeline. All videos are first seeked
+   * into place, then a single shared clock starts and every video is started against it; from then
+   * on tick() keeps each one locked to that clock, since separately-started <video> elements
+   * otherwise start with jitter and slowly drift apart.
+   */
+  private async playFrom(sessionSeconds: number): Promise<void> {
     if (!this.clipsReady()) return;
-    this.clearPendingStartTimers();
+    const token = ++this.playToken;
+    this.stopClock();
     this.applyRates();
     this.isPlaying.set(true);
     this.timelinePosition.set(sessionSeconds);
 
-    const { videos, durations, maxDuration } = this.durationsAndMax();
-    const rate = this.playbackRate();
+    await this.seekAndWait(sessionSeconds);
+    if (token !== this.playToken) return; // paused, scrubbed or restarted while seeking
+
+    this.clockBasePosition = sessionSeconds;
+    this.clockBaseWall = performance.now();
+    const { videos, durations } = this.durationsAndMax();
+    const delays = this.clipDelays();
     videos.forEach((video, i) => {
-      const duration = durations[i] || maxDuration;
-      const delaySec = this.startDelaySeconds(duration, maxDuration, videos.length);
-      const remainingDelaySec = delaySec - sessionSeconds;
-      if (remainingDelaySec <= 0) {
-        video.currentTime = Math.min(Math.max(sessionSeconds - delaySec, 0), duration);
+      const target = sessionSeconds - (delays[i] ?? 0);
+      if (target >= 0 && target < durations[i]) void video.play();
+    });
+    this.rafHandle = requestAnimationFrame(this.tick);
+  }
+
+  private readonly tick = (): void => {
+    if (!this.isPlaying()) {
+      this.rafHandle = null;
+      return;
+    }
+    const now = performance.now();
+    const rate = this.playbackRate();
+    const position = this.clockBasePosition + ((now - this.clockBaseWall) / 1000) * rate;
+    const { videos, durations } = this.durationsAndMax();
+    const delays = this.clipDelays();
+    const total = this.timelineDuration();
+    const drifts: number[] = [];
+
+    videos.forEach((video, i) => {
+      const target = position - (delays[i] ?? 0);
+      const duration = durations[i];
+      if (target < 0 || target >= duration) {
+        // Not started yet, or already finished: hold still (on its first / last frame).
+        if (!video.paused) video.pause();
+        drifts.push(0);
+        return;
+      }
+      if (video.paused) {
+        // Just reached its start on the shared timeline.
+        video.currentTime = target;
+        video.playbackRate = rate;
         void video.play();
+        drifts.push(0);
+        return;
+      }
+      const error = video.currentTime - target; // + = this video is ahead of the shared clock
+      drifts.push(error * 1000);
+      if (Math.abs(error) > HARD_SEEK_THRESHOLD_SEC) {
+        video.currentTime = target;
+        video.playbackRate = rate;
       } else {
-        video.currentTime = 0;
-        this.pendingStartTimers.push(setTimeout(() => void video.play(), (remainingDelaySec / rate) * 1000));
+        const limit = MAX_RATE_CORRECTION * rate;
+        video.playbackRate = rate + Math.min(limit, Math.max(-limit, -error / DRIFT_CORRECTION_SEC));
       }
     });
-  }
 
-  /** Repositions every clip to a point on the shared timeline without playing - used while
-   *  the user drags the scrub slider. */
-  private seekTo(sessionSeconds: number): void {
-    const { videos, durations, maxDuration } = this.durationsAndMax();
-    videos.forEach((video, i) => {
-      const duration = durations[i] || maxDuration;
-      const delaySec = this.startDelaySeconds(duration, maxDuration, videos.length);
-      video.currentTime = Math.min(Math.max(sessionSeconds - delaySec, 0), duration);
-    });
-  }
+    this.timelinePosition.set(Math.min(position, total));
+    if (now - this.lastDriftPublish > 250) {
+      this.lastDriftPublish = now;
+      this.driftMs.set(drifts);
+    }
 
-  /** Drives the scrub slider's range/position from the longest clip - the one clip that always
-   *  starts at shared-timeline 0 with no delay, whether sync is on or off (see startDelaySeconds()). */
-  private setupTimelineTracking(): void {
-    const { videos, durations, maxDuration } = this.durationsAndMax();
-    this.timelineDuration.set(maxDuration);
-    this.timelinePosition.set(0);
-    const referenceIndex = durations.indexOf(maxDuration);
-    const reference = videos[referenceIndex];
-    if (!reference) return;
-    reference.ontimeupdate = () => this.timelinePosition.set(reference.currentTime);
-  }
-
-  private setupEndedListeners(generation: number): void {
-    const videos = this.videoRefs();
-    this.endedIndices.clear();
-    videos.forEach((ref, i) => {
-      ref.nativeElement.onended = () => {
-        if (generation !== this.generation) return;
-        this.endedIndices.add(i);
-        if (this.endedIndices.size >= videos.length) {
-          this.endedIndices.clear();
-          this.isPlaying.set(false);
-          this.handleRoundComplete();
-        }
-      };
-    });
-  }
+    if (position >= total) {
+      this.rafHandle = null;
+      this.isPlaying.set(false);
+      for (const video of videos) video.pause();
+      this.handleRoundComplete();
+      return;
+    }
+    this.rafHandle = requestAnimationFrame(this.tick);
+  };
 
   private handleRoundComplete(): void {
     const limit = this.loopsConfigured();

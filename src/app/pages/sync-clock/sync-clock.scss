@@ -1,0 +1,23 @@
+.sync-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+}
+
+.readout {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: clamp(3rem, 22vw, 9rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.hint {
+  margin: 0;
+  max-width: 32rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.6);
+}

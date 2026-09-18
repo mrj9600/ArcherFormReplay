@@ -34,6 +34,16 @@
           <p class="hint">Preparing clip{{ clipSet.clips.length > 1 ? 's' : '' }}…</p>
         }
 
+        <details class="timing-debug">
+          <summary>Timing debug</summary>
+          <dl>
+            @for (row of debugRows(); track row.key) {
+              <dt>{{ row.key }}</dt>
+              <dd>{{ row.value }}</dd>
+            }
+          </dl>
+        </details>
+
         @if (loopsConfigured() > 0 && !autoReturnCancelled() && clipsReady()) {
           <div class="auto-return-banner">
             <mat-icon>replay</mat-icon>

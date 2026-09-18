@@ -109,5 +109,37 @@
     </p>
   </div>
 
+  <div class="setting">
+    <label class="toggle-row">
+      <input type="checkbox" [checked]="settingsService.settings().preciseCapture" (change)="onPreciseCaptureChange($event)" />
+      <mat-icon>timer</mat-icon>
+      Precise frame timing
+    </label>
+    <p class="hint">
+      Stamps every frame with when the camera captured it and cuts clips exactly on frame
+      boundaries, for tight multi-camera sync. Turn off to use the plain browser recorder if a
+      device has trouble. Applies to this device only; takes effect the next time Record opens.
+    </p>
+  </div>
+
+  <div class="setting">
+    <label for="timingOffset">
+      <mat-icon>schedule</mat-icon>
+      Camera timing offset (ms)
+    </label>
+    <input
+      id="timingOffset"
+      type="number"
+      step="1"
+      [value]="settingsService.settings().videoTimingOffsetMs"
+      (change)="onTimingOffsetChange($event)"
+    />
+    <p class="hint">
+      This device only. If, at the same point in Review, this camera shows an earlier moment than
+      the others (measure with the <a routerLink="/sync-clock">sync clock</a>), enter that
+      difference here to move its video earlier on the shared timeline. Leave at 0 otherwise.
+    </p>
+  </div>
+
   <p class="version">Version {{ appVersion.sha }} · built {{ appVersion.builtAt }}</p>
 </div>

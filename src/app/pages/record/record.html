@@ -25,6 +25,20 @@
           <ng-container [ngTemplateOutlet]="statusChip" />
         </mat-chip-set>
 
+        @if (timingLabel(); as timing) {
+          <p class="hint timing-hint">{{ timing }}</p>
+        }
+
+        <details class="timing-debug">
+          <summary>Timing debug</summary>
+          <dl>
+            @for (row of debugRows(); track row.key) {
+              <dt>{{ row.key }}</dt>
+              <dd>{{ row.value }}</dd>
+            }
+          </dl>
+        </details>
+
         @if (deviceStates().length > 0) {
           <ul class="device-states">
             @for (device of deviceStates(); track device.id) {

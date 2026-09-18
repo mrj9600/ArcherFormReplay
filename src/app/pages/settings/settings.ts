@@ -1,5 +1,6 @@
 import { Component, DestroyRef, ElementRef, OnInit, effect, inject, signal, viewChild } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { RouterLink } from '@angular/router';
 import { AUTO_RETURN_MANUAL, SettingsService } from '../../services/settings.service';
 import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { CameraService } from '../../services/camera.service';
@@ -10,7 +11,7 @@ const FRONT_OPTION_VALUE = '__front__';
 
 @Component({
   selector: 'app-settings',
-  imports: [MatIconModule, MicCalibration],
+  imports: [MatIconModule, MicCalibration, RouterLink],
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
 })
@@ -87,6 +88,15 @@ export class Settings implements OnInit {
 
   protected onSyncClipEndsChange(event: Event): void {
     this.settingsService.update({ syncClipEnds: (event.target as HTMLInputElement).checked });
+  }
+
+  protected onPreciseCaptureChange(event: Event): void {
+    this.settingsService.update({ preciseCapture: (event.target as HTMLInputElement).checked });
+  }
+
+  protected onTimingOffsetChange(event: Event): void {
+    const value = Number((event.target as HTMLInputElement).value);
+    this.settingsService.update({ videoTimingOffsetMs: Number.isFinite(value) ? value : 0 });
   }
 
   protected readonly autoReturnLoopOptions = [1, 2, 3, 4, 5];

@@ -2,11 +2,12 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Subject } from 'rxjs';
 import { Router } from '@angular/router';
 import Peer, { DataConnection } from 'peerjs';
-import { SettingsService } from './settings.service';
+import { AppSettings, DEVICE_LOCAL_SETTINGS, SettingsService } from './settings.service';
 import { decodeTimestamp, encodeTimestamp, epochNow } from './time';
 import {
   ArmMessage,
   ClipAckMessage,
+  ClipDebug,
   ClipMessage,
   DeviceState,
   DeviceStateMessage,
@@ -35,6 +36,9 @@ export interface ConnectedSlave {
 export interface IncomingClip {
   slaveId: string;
   blob: Blob;
+  /** First-frame time on the master's epoch clock, if the slave knew it exactly. */
+  startEpochMs: number | null;
+  debug: ClipDebug | null;
   triggerSeq: number;
 }
 
@@ -48,20 +52,33 @@ export interface LocalTriggerEvent {
 }
 
 export interface CollectionResult {
-  clips: Map<string, Blob>;
+  clips: Map<string, { blob: Blob; startEpochMs: number | null; debug: ClipDebug | null }>;
   /** Slaves that were expected but never delivered a clip for this trigger. */
   missingIds: string[];
+}
+
+/** Snapshot of this slave's clock-sync state, for the timing debug readout. */
+export interface SyncInfo {
+  offsetMs: number;
+  bestRoundTripMs: number;
+  freshSamples: number;
+  totalSamples: number;
+  bestSampleAgeMs: number;
 }
 
 interface SyncSample {
   roundTripMs: number;
   offsetMs: number;
+  at: number;
 }
 
-const SYNC_BURST_COUNT = 8;
-const SYNC_BURST_INTERVAL_MS = 150;
-const SYNC_INTERVAL_MS = 10_000;
-const SYNC_SAMPLES_KEPT = 12;
+const SYNC_BURST_COUNT = 16;
+const SYNC_BURST_INTERVAL_MS = 100;
+const SYNC_INTERVAL_MS = 5_000;
+const SYNC_SAMPLES_KEPT = 40;
+/** Offset samples older than this are ignored: a device's epoch clock (performance.now) can stall
+ *  while it sleeps, so an old low-round-trip sample may be badly wrong after a wake-up. */
+const SYNC_SAMPLE_MAX_AGE_MS = 30_000;
 const MAX_ROOM_CODE_ATTEMPTS = 5;
 /** Collecting slave clips gives up on a device only after this long with no sign of life from
  *  it (a state update, a clip, ...) - a slow trim or upload on a busy phone is not a failure. */
@@ -69,6 +86,15 @@ const COLLECT_INACTIVITY_MS = 45_000;
 const COLLECT_HARD_CAP_MS = 180_000;
 /** How long after a trigger a slave has to show any sign of life before it's written off. */
 const FIRST_RESPONSE_MS = 8_000;
+
+function parseDebug(raw: string | undefined): ClipDebug | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ClipDebug;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Owns the PeerJS connection(s) for a pairing session and speaks the small JSON+binary
@@ -95,6 +121,8 @@ export class SessionService {
   readonly connectedSlaves = signal<ConnectedSlave[]>([]);
   /** Slave only: true once at least one clock-sync round trip has completed. */
   readonly isSynced = signal(false);
+  /** Slave only: details of the current clock-offset estimate. */
+  readonly syncInfo = signal<SyncInfo | null>(null);
   /** Master only: the latest state each connected slave reported, by slave id. */
   readonly slaveStates = signal<Record<string, DeviceState>>({});
   /** Master: whether the master is currently on Record and ready for a shot. Slave: whether the
@@ -316,9 +344,21 @@ export class SessionService {
   }
 
   /** Slave only: send this device's clip back to master for a given trigger. */
-  sendClip(blob: Blob, mimeType: string, triggerSeq: number): void {
+  sendClip(blob: Blob, mimeType: string, triggerSeq: number, startEpochMs: number | null, debug: ClipDebug = {}): void {
     if (!this.masterConn?.open) return;
-    const message: ClipMessage = { type: 'clip', triggerSeq, mimeType, data: blob };
+    const message: ClipMessage = {
+      type: 'clip',
+      triggerSeq,
+      mimeType,
+      data: blob,
+      // Converted to the master's clock here, with the offset in use right now.
+      startEpochMs: startEpochMs === null ? undefined : encodeTimestamp(startEpochMs + this.clockOffsetMs),
+      debug: JSON.stringify({
+        ...debug,
+        syncOffsetMs: Math.round(this.clockOffsetMs * 100) / 100,
+        syncRttMs: this.syncInfo() ? Math.round(this.syncInfo()!.bestRoundTripMs * 100) / 100 : -1,
+      }),
+    };
     this.masterConn.send(message);
   }
 
@@ -331,7 +371,7 @@ export class SessionService {
   collectClips(triggerSeq: number): Promise<CollectionResult> {
     const expectedIds = [...this.slaveConns.keys()];
     return new Promise((resolve) => {
-      const clips = new Map<string, Blob>();
+      const clips = new Map<string, { blob: Blob; startEpochMs: number | null; debug: ClipDebug | null }>();
       if (expectedIds.length === 0) {
         resolve({ clips, missingIds: [] });
         return;
@@ -367,7 +407,7 @@ export class SessionService {
       const subscriptions = [
         this.clipReceived$.subscribe((clip) => {
           if (clip.triggerSeq !== triggerSeq || !outstanding.has(clip.slaveId)) return;
-          clips.set(clip.slaveId, clip.blob);
+          clips.set(clip.slaveId, { blob: clip.blob, startEpochMs: clip.startEpochMs, debug: clip.debug });
           settle(clip.slaveId);
         }),
         this.slaveActivity$.subscribe(({ slaveId, state, triggerSeq: replySeq }) => {
@@ -454,7 +494,13 @@ export class SessionService {
       const ack: ClipAckMessage = { type: 'clip-ack', triggerSeq: data.triggerSeq };
       conn.send(ack);
       this.slaveActivity$.next({ slaveId: conn.peer });
-      this.clipReceived$.next({ slaveId: conn.peer, blob, triggerSeq: data.triggerSeq });
+      this.clipReceived$.next({
+        slaveId: conn.peer,
+        blob,
+        startEpochMs: data.startEpochMs === undefined ? null : decodeTimestamp(data.startEpochMs),
+        debug: parseDebug(data.debug),
+        triggerSeq: data.triggerSeq,
+      });
     } else if (data.type === 'remote-trigger') {
       this.remoteTriggerRequested$.next(decodeTimestamp(data.estimatedMasterTs));
     } else if (data.type === 'device-state') {
@@ -467,9 +513,13 @@ export class SessionService {
     if (!isSessionMessage(data)) return;
 
     switch (data.type) {
-      case 'welcome':
-        this.settingsService.update(data.settings);
+      case 'welcome': {
+        // Everything but this device's own hardware-specific settings follows the master.
+        const shared: Partial<AppSettings> = { ...data.settings };
+        for (const key of DEVICE_LOCAL_SETTINGS) delete shared[key];
+        this.settingsService.update(shared);
         break;
+      }
       case 'trigger-assignment':
         this.triggerDeviceId.set(data.triggerDeviceId);
         break;
@@ -518,9 +568,17 @@ export class SessionService {
     const roundTripMs = receivedAt - sentAt;
     // masterClock - thisDeviceClock, assuming the master handled the ping halfway through the trip.
     const offsetMs = decodeTimestamp(pong.receivedAt) - (sentAt + roundTripMs / 2);
-    this.syncSamples = [...this.syncSamples, { roundTripMs, offsetMs }].slice(-SYNC_SAMPLES_KEPT);
-    const best = this.syncSamples.reduce((a, b) => (b.roundTripMs < a.roundTripMs ? b : a));
+    this.syncSamples = [...this.syncSamples, { roundTripMs, offsetMs, at: receivedAt }].slice(-SYNC_SAMPLES_KEPT);
+    const fresh = this.syncSamples.filter((s) => receivedAt - s.at <= SYNC_SAMPLE_MAX_AGE_MS);
+    const best = fresh.reduce((a, b) => (b.roundTripMs < a.roundTripMs ? b : a));
     this.clockOffsetMs = best.offsetMs;
+    this.syncInfo.set({
+      offsetMs: best.offsetMs,
+      bestRoundTripMs: best.roundTripMs,
+      freshSamples: fresh.length,
+      totalSamples: this.syncSamples.length,
+      bestSampleAgeMs: receivedAt - best.at,
+    });
     this.isSynced.set(true);
   }
 
@@ -569,6 +627,7 @@ export class SessionService {
     this.clockOffsetMs = 0;
     this.syncSamples = [];
     this.isSynced.set(false);
+    this.syncInfo.set(null);
     this.collectionProgress.set(null);
     this.slaveStates.set({});
     this.armed.set(false);

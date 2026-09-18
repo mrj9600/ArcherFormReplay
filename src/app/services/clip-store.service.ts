@@ -4,6 +4,10 @@ export interface StoredClip {
   deviceLabel: string;
   url: string;
   mimeType: string;
+  /** Epoch ms on the master's clock at which this clip's first frame was captured, when known exactly. */
+  startEpochMs: number | null;
+  /** Timing debug numbers about how this clip was captured/cut. */
+  debug: Record<string, string | number> | null;
 }
 
 export interface ClipSet {
@@ -31,12 +35,14 @@ export class ClipStoreService {
     this.setClips([{ deviceLabel: 'You', blob }]);
   }
 
-  setClips(items: { deviceLabel: string; blob: Blob }[], note?: string): void {
+  setClips(items: { deviceLabel: string; blob: Blob; startEpochMs?: number | null; debug?: Record<string, string | number> | null }[], note?: string): void {
     this.revokeAll();
     const clips = items.map((item) => ({
       deviceLabel: item.deviceLabel,
       url: URL.createObjectURL(item.blob),
       mimeType: item.blob.type || 'video/webm',
+      startEpochMs: item.startEpochMs ?? null,
+      debug: item.debug ?? null,
     }));
     this.objectUrls = clips.map((c) => c.url);
     this.clipSet.set({ capturedAt: Date.now(), clips, note });

@@ -10,8 +10,8 @@ import { RollingBufferRecorderService } from '../../services/rolling-buffer-reco
 import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
-import { LocalTriggerEvent, SessionService } from '../../services/session.service';
-import { DEVICE_STATE_LABELS, DeviceState } from '../../services/session-protocol';
+import { CollectionResult, LocalTriggerEvent, SessionService } from '../../services/session.service';
+import { ClipDebug, DEVICE_STATE_LABELS, DeviceState } from '../../services/session-protocol';
 import { epochNow } from '../../services/time';
 import { MicCalibration } from '../../components/mic-calibration/mic-calibration';
 
@@ -101,6 +101,65 @@ export class Record implements OnInit {
         state: DEVICE_STATE_LABELS[slaveStates[slave.id] ?? 'idle'],
       })),
     ];
+  });
+
+  /** Which timing accuracy tier this device's recording is on (see RecorderTiming). */
+  protected readonly timingLabel = computed(() => {
+    switch (this.buffer.timing()) {
+      case 'capture-time':
+        return 'Frame timing: camera capture time (precise)';
+      case 'smoothed-arrival':
+        return 'Frame timing: estimated from frame arrival';
+      case 'basic':
+        return 'Frame timing: basic (less precise sync)';
+      default:
+        return null;
+    }
+  });
+
+  /** Timing debug numbers about the most recent clip this device cut. */
+  protected readonly lastShotDebug = signal<ClipDebug | null>(null);
+
+  /** Rows for the timing debug readout - live recorder stats, this device's clock sync, and the
+   *  last clip's cut details. Left in for real-device sync testing. */
+  protected readonly debugRows = computed(() => {
+    const rows: { key: string; value: string }[] = [];
+    const num = (n: number, digits = 1) => (Number.isFinite(n) ? n.toFixed(digits) : '-');
+    const stats = this.buffer.stats();
+    const mode = this.buffer.mode();
+    rows.push({
+      key: 'Recorder',
+      value:
+        mode === 'precise'
+          ? 'PRECISE capture (WebCodecs)'
+          : mode === 'media-recorder'
+            ? `MediaRecorder (basic) - ${this.buffer.fallbackReason() || 'in use'}`
+            : 'not recording',
+    });
+    rows.push({ key: 'Frame timestamps', value: this.buffer.timing() ?? '-' });
+    if (stats) {
+      rows.push({ key: 'Codec', value: `${stats.codec || '-'} ${stats.size} @${num(stats.fps, 0)}fps` });
+      rows.push({ key: 'Frames', value: `${stats.framesIn} in, ${stats.framesDropped} dropped, ${stats.bufferedFrames} buffered (${num(stats.bufferedSeconds)}s)` });
+      rows.push({ key: 'Frame interval', value: `${num(stats.intervalMeanMs)}ms avg, max dev ${num(stats.intervalMaxDevMs)}ms` });
+      if (stats.arrivalJitterMs !== null) {
+        rows.push({ key: 'Arrival jitter (smoothed out)', value: `${num(stats.arrivalJitterMs)}ms` });
+      }
+    }
+    rows.push({ key: 'Timing offset setting', value: `${this.settings.settings().videoTimingOffsetMs}ms` });
+    if (this.session.role() === 'slave') {
+      const sync = this.session.syncInfo();
+      rows.push({
+        key: 'Clock vs master',
+        value: sync
+          ? `${num(sync.offsetMs, 2)}ms, best RTT ${num(sync.bestRoundTripMs, 2)}ms, ${sync.freshSamples}/${sync.totalSamples} samples, age ${num(sync.bestSampleAgeMs / 1000)}s`
+          : 'not synced yet',
+      });
+    }
+    const last = this.lastShotDebug();
+    if (last) {
+      rows.push({ key: 'Last clip', value: Object.entries(last).map(([k, v]) => `${k}=${typeof v === 'number' ? num(v, 1) : v}`).join(' ') });
+    }
+    return rows;
   });
 
   private readonly isReady = signal(false);
@@ -344,25 +403,28 @@ export class Record implements OnInit {
                 this.buffer.stop();
               },
             })
-            .then((blob) => {
+            .then((clip) => {
               this.ownClipReady.set(true);
+              this.lastShotDebug.set(clip.debug);
               if (isMaster && this.session.collectionProgress()) this.status.set('collecting');
-              return blob;
+              return clip;
             })
         : Promise.resolve(null);
       if (isMaster && !recordsVideo && this.session.connectedSlaves().length > 0) this.status.set('collecting');
 
-      const [ownBlob, collection] = await Promise.all([
+      const [ownClip, collection] = await Promise.all([
         ownClipPromise,
-        isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve({ clips: new Map<string, Blob>(), missingIds: [] }),
+        isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve<CollectionResult>({ clips: new Map(), missingIds: [] }),
       ]);
 
-      const items: { deviceLabel: string; blob: Blob }[] = [];
-      if (ownBlob) items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob });
+      const items: { deviceLabel: string; blob: Blob; startEpochMs: number | null; debug: ClipDebug | null }[] = [];
+      if (ownClip) {
+        items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownClip.blob, startEpochMs: ownClip.startEpochMs, debug: ownClip.debug });
+      }
       let index = 1;
-      for (const [slaveId, blob] of collection.clips) {
+      for (const [slaveId, { blob, startEpochMs, debug }] of collection.clips) {
         index += 1;
-        items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
+        items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob, startEpochMs, debug });
       }
       const missing = collection.missingIds.length;
       if (missing > 0) {
@@ -435,7 +497,7 @@ export class Record implements OnInit {
     // This device has taken its shot - it stays idle until the master arms it again.
     this.session.consumeArm();
     try {
-      const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds, {
+      const clip = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds, {
         onClipping: () => {
           this.status.set('clipping');
           this.buffer.stop();
@@ -443,7 +505,8 @@ export class Record implements OnInit {
       });
       this.status.set('sending');
       const acknowledged = this.waitForClipAck(triggerSeq);
-      this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
+      this.lastShotDebug.set(clip.debug);
+      this.session.sendClip(clip.blob, clip.blob.type, triggerSeq, clip.startEpochMs, clip.debug);
       await acknowledged;
     } catch (err) {
       console.error('Slave trigger handling failed', err);
