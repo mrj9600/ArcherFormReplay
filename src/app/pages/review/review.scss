@@ -13,6 +13,14 @@
   min-height: 0;
 }
 
+.media-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .clip-grid {
   display: flex;
   flex-wrap: wrap;
@@ -232,9 +240,45 @@
     height: 90vh;
   }
 
-  // No position labels under the scrub bar - just the bar itself.
+  // The timeline floats over the bottom of the clip grid instead of pushing it up - that's the
+  // only way to get the labels back without shrinking the video to make room for them.
+  //
+  // It's anchored to .review-media, deliberately NOT to .media-scroll (the actual scrolling
+  // element, below) - an absolutely positioned element still scrolls along with its containing
+  // block's content when that block is itself the scroll container, so anchoring it there would
+  // make the "pinned" overlay drift away as the clips scroll. Splitting the scrolling area
+  // (.media-scroll) from the positioning context (.review-media, which never scrolls) keeps the
+  // overlay visually fixed at the bottom of the view while its content scrolls underneath it.
+  .review-media {
+    position: relative;
+  }
+
+  .media-scroll {
+    overflow-y: auto;
+  }
+
+  .clip-grid {
+    // Reserves scroll room clear of the overlay: without this, the bottom of a tall clip would
+    // permanently sit behind the timeline with no way to scroll it into view.
+    padding-bottom: 3.5rem;
+    // Without this, .review-media's flex-shrink (its default) would rather compress the grid to
+    // fit than let this padding actually overflow - defeating the point of reserving it.
+    flex-shrink: 0;
+  }
+
+  .timeline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0.4rem 0.6rem;
+    padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 0 0 8px 8px;
+  }
+
   .timeline-labels {
-    display: none;
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .controls {
