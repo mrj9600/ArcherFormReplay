@@ -101,7 +101,7 @@
           Playback speed: {{ playbackRate() }}x
         </label>
 
-        <select id="rateSelect" class="rate-select" [value]="playbackRate()" (change)="onRateSelectChange($event)">
+        <select id="rateSelect" #rateSelect class="rate-select" (change)="onRateSelectChange($event)">
           @for (speed of speedOptions; track speed) {
             <option [value]="speed">{{ speed }}x</option>
           }

@@ -1,4 +1,4 @@
-import { Component, ElementRef, effect, inject, signal, viewChildren } from '@angular/core';
+import { Component, ElementRef, effect, inject, signal, viewChild, viewChildren } from '@angular/core';
 import { Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -17,6 +17,7 @@ export class Review {
   private readonly router = inject(Router);
 
   protected readonly videoRefs = viewChildren<ElementRef<HTMLVideoElement>>('player');
+  protected readonly rateSelectRef = viewChild<ElementRef<HTMLSelectElement>>('rateSelect');
   protected readonly speedOptions = [0.1, 0.25, 0.5, 1, 2];
   protected readonly playbackRate = signal(1);
   protected readonly isPlaying = signal(false);
@@ -57,6 +58,21 @@ export class Review {
       this.autoReturnCancelled.set(false);
       this.loopsCompleted.set(0);
       void this.prepare(generation);
+    });
+
+    // A native <select>'s [value] binding can fail to take if it's applied before the browser
+    // has matched it against a same-value <option> - here, before the @for-rendered <option>s
+    // exist yet on the very first render - and Angular only re-applies the binding when the
+    // *source* value changes, not retroactively once a matching option shows up. The visible
+    // symptom: the dropdown shows the browser's fallback (whichever option sorts first) while
+    // playbackRate - and therefore actual playback - is unaffected and still correct. Setting it
+    // imperatively here instead, after the view (including the options) is guaranteed to exist,
+    // sidesteps that ordering problem entirely.
+    effect(() => {
+      const select = this.rateSelectRef()?.nativeElement;
+      const rate = this.playbackRate();
+      if (!select) return;
+      select.value = String(rate);
     });
   }
 
