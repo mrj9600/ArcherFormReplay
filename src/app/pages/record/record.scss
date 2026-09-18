@@ -39,6 +39,31 @@
   align-self: flex-start;
 }
 
+.device-states {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    column-gap: 0.5rem;
+  }
+
+  .device-name {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  .device-state {
+    font-weight: 500;
+  }
+}
+
 .error-panel {
   display: flex;
   flex-direction: column;

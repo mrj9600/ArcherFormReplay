@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
@@ -10,10 +10,33 @@ import { RollingBufferRecorderService } from '../../services/rolling-buffer-reco
 import { SoundTriggerService } from '../../services/sound-trigger.service';
 import { SettingsService } from '../../services/settings.service';
 import { ClipStoreService } from '../../services/clip-store.service';
-import { SessionService } from '../../services/session.service';
+import { LocalTriggerEvent, SessionService } from '../../services/session.service';
+import { DEVICE_STATE_LABELS, DeviceState } from '../../services/session-protocol';
+import { epochNow } from '../../services/time';
 import { MicCalibration } from '../../components/mic-calibration/mic-calibration';
 
-type RecordStatus = 'listening' | 'waiting-for-master' | 'coordinating' | 'manual-only' | 'capturing' | 'error';
+/**
+ * What this device is doing, in the order a shot goes through them:
+ * idle (slave, not armed) -> listening / waiting-for-master (armed) -> capturing (the post-roll
+ * after the trigger is still being recorded) -> clipping (cutting the clip) -> sending (slave:
+ * uploading it) or collecting (master: waiting for the slaves' clips).
+ */
+type RecordStatus =
+  | 'idle'
+  | 'listening'
+  | 'waiting-for-master'
+  | 'coordinating'
+  | 'manual-only'
+  | 'capturing'
+  | 'clipping'
+  | 'sending'
+  | 'collecting'
+  | 'error';
+
+const BUSY_STATUSES: readonly RecordStatus[] = ['capturing', 'clipping', 'sending', 'collecting'];
+/** A slave stays "sending" until the master acknowledges the clip; if that ack never comes
+ *  (e.g. the master moved on), give up waiting after this long instead of hanging forever. */
+const CLIP_ACK_TIMEOUT_MS = 90_000;
 
 @Component({
   selector: 'app-record',
@@ -41,6 +64,9 @@ export class Record implements OnInit {
   protected readonly videoRef = viewChild<ElementRef<HTMLVideoElement>>('preview');
   protected readonly status = signal<RecordStatus>(this.computeIdleStatus());
   protected readonly recordsVideo = signal(true);
+  /** True while a shot is in progress on this device (anything from the trigger until its clip
+   *  has been delivered) - further triggers are ignored and idle-status syncing is suspended. */
+  protected readonly busy = computed(() => BUSY_STATUSES.includes(this.status()));
 
   /** Master always gets a manual override; a slave only gets one when it's the assigned trigger device. */
   protected readonly showTestButton = computed(() => this.session.role() !== 'slave' || this.session.isTriggerDevice());
@@ -57,6 +83,24 @@ export class Record implements OnInit {
       received: progress.received + (includesOwn && this.ownClipReady() ? 1 : 0),
       expected: progress.expected + (includesOwn ? 1 : 0),
     };
+  });
+
+  /** Master only: this device plus every connected slave with what each is currently doing, so
+   *  it's clear whose clip is still to come. */
+  protected readonly deviceStates = computed(() => {
+    if (this.session.role() !== 'master') return [];
+    const slaveStates = this.session.slaveStates();
+    const slaves = this.session.connectedSlaves();
+    if (slaves.length === 0) return [];
+    const own = { id: 'master', label: 'You (master)', state: this.ownStateLabel() };
+    return [
+      own,
+      ...slaves.map((slave, i) => ({
+        id: slave.id,
+        label: `Camera ${i + 2} (${slave.id.slice(-4)})`,
+        state: DEVICE_STATE_LABELS[slaveStates[slave.id] ?? 'idle'],
+      })),
+    ];
   });
 
   private readonly isReady = signal(false);
@@ -122,11 +166,27 @@ export class Record implements OnInit {
       }
     });
 
+    // Slave: records only while the master has armed this device (i.e. is on its Record page).
+    effect(() => {
+      const armed = this.session.armed();
+      if (!this.isReady() || this.session.role() !== 'slave') return;
+      untracked(() => this.applySlaveArm(armed));
+    });
+
+    // Slave: keeps the master informed of what this device is doing.
+    effect(() => {
+      const status = this.status();
+      if (!this.isReady() || this.session.role() !== 'slave') return;
+      untracked(() => this.session.reportDeviceState(this.toDeviceState(status)));
+    });
+
     this.destroyRef.onDestroy(() => {
       this.soundTrigger.stop();
       this.buffer.stop();
       this.camera.stop();
       this.micOnlyStream?.getTracks().forEach((track) => track.stop());
+      if (this.session.role() === 'master') this.session.setArmed(false);
+      if (this.session.role() === 'slave') this.session.reportDeviceState('idle');
     });
   }
 
@@ -148,7 +208,8 @@ export class Record implements OnInit {
         const withAudio = this.session.isTriggerDevice();
         try {
           const stream = await this.camera.start(undefined, withAudio);
-          this.buffer.start(stream);
+          // A slave keeps its camera live but only records once the master arms it.
+          if (!isSlave) this.buffer.start(stream);
         } catch (err) {
           // A slave's whole purpose is contributing a camera angle - no camera is fatal there.
           // The master (or a solo device) can still coordinate/be triggered manually without
@@ -161,10 +222,10 @@ export class Record implements OnInit {
       if (isSlave) {
         this.session.localTrigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe(({ localTs, triggerSeq }) => this.handleSlaveTrigger(localTs, triggerSeq));
+          .subscribe((event) => this.handleSlaveTrigger(event));
         this.soundTrigger.trigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe(({ timestamp }) => this.session.reportLocalTrigger(timestamp));
+          .subscribe(({ timestamp }) => this.reportSlaveTrigger(timestamp));
       } else {
         this.soundTrigger.trigger$
           .pipe(takeUntilDestroyed(this.destroyRef))
@@ -178,6 +239,7 @@ export class Record implements OnInit {
 
       this.isReady.set(true);
       this.syncIdleStatus();
+      if (role === 'master') this.session.setArmed(true);
     } catch {
       this.status.set('error');
     }
@@ -185,84 +247,160 @@ export class Record implements OnInit {
 
   protected testTrigger(): void {
     if (this.session.role() === 'slave') {
-      if (this.session.isTriggerDevice()) this.session.reportLocalTrigger(performance.now());
+      this.reportSlaveTrigger(epochNow());
       return;
     }
     this.soundTrigger.manualTrigger();
   }
 
+  /** What the master's device list says this device is doing. */
+  private ownStateLabel(): string {
+    switch (this.status()) {
+      case 'capturing':
+        return DEVICE_STATE_LABELS.capturing;
+      case 'clipping':
+        return DEVICE_STATE_LABELS.clipping;
+      case 'collecting':
+        return 'Collecting clips';
+      case 'error':
+        return DEVICE_STATE_LABELS.error;
+      default:
+        return this.recordsVideo() ? DEVICE_STATE_LABELS.armed : 'Coordinating';
+    }
+  }
+
+  private toDeviceState(status: RecordStatus): DeviceState {
+    switch (status) {
+      case 'capturing':
+      case 'clipping':
+      case 'sending':
+        return status;
+      case 'error':
+        return 'error';
+      case 'idle':
+        return 'idle';
+      default:
+        return 'armed';
+    }
+  }
+
   private syncIdleStatus(): void {
-    if (this.status() === 'capturing' || this.status() === 'error') return;
+    if (this.busy() || this.status() === 'error') return;
     this.status.set(this.computeIdleStatus());
   }
 
   /** Unconditionally returns to the idle status - unlike syncIdleStatus(), which deliberately
-   *  leaves 'capturing' alone so reactive settings/role changes can't clobber an active capture.
-   *  A trigger handler's own finally block is the one legitimate place that capturing state
-   *  needs to be cleared from, so it must bypass that guard rather than go through it. */
-  private clearCapturingStatus(): void {
+   *  leaves a shot in progress alone so reactive settings/role changes can't clobber it. A
+   *  trigger handler's own finally block is the one legitimate place a busy state needs to be
+   *  cleared from, so it must bypass that guard rather than go through it. */
+  private clearBusyStatus(): void {
     this.status.set(this.computeIdleStatus());
   }
 
-  /** The role/trigger-device-aware status to show whenever nothing is actively capturing -
+  /** The role/trigger-device-aware status to show whenever nothing is actively in progress -
    *  used both as the initial value (so the page never shows a generic "starting" state) and
    *  whenever role/trigger-device assignment changes. */
   private computeIdleStatus(): RecordStatus {
     const isSlave = this.session.role() === 'slave';
     const isTrigger = this.session.isTriggerDevice();
     if (isTrigger && this.micUnavailable()) return 'manual-only';
-    if (isSlave) return isTrigger ? 'listening' : 'waiting-for-master';
+    if (isSlave) {
+      if (!this.session.armed()) return 'idle';
+      return isTrigger ? 'listening' : 'waiting-for-master';
+    }
     return isTrigger ? 'listening' : 'coordinating';
   }
 
+  /** Slave: starts recording when armed, stops when disarmed - and never interferes with a shot
+   *  that's already in progress (its own finish re-evaluates this once it's done). */
+  private applySlaveArm(armed: boolean): void {
+    if (this.busy()) return;
+    const stream = this.camera.stream();
+    if (armed && stream && !this.buffer.isRecording()) {
+      this.buffer.start(stream);
+    } else if (!armed && this.buffer.isRecording()) {
+      this.buffer.stop();
+    }
+    this.syncIdleStatus();
+  }
+
+  /** Slave that is the trigger device: only a device that's recording and free can usefully ask
+   *  the master to fire - otherwise the shot would start with this camera missing. */
+  private reportSlaveTrigger(timestamp: number): void {
+    if (!this.session.armed() || this.busy() || !this.buffer.isRecording()) return;
+    this.session.reportLocalTrigger(timestamp);
+  }
+
   private async handleLocalTrigger(timestamp: number): Promise<void> {
-    if (this.status() === 'capturing') return;
+    if (this.busy()) return;
     this.status.set('capturing');
+    let restartAfterShot = false;
 
     try {
       const isMaster = this.session.role() === 'master';
       const recordsVideo = this.recordsVideo();
-      const expectedSlaveCount = this.session.expectedClipCount;
-      const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp) : -1;
+      const { preRollSeconds, postRollSeconds } = this.settings.settings();
+      const triggerSeq = isMaster ? this.session.broadcastTrigger(timestamp, preRollSeconds, postRollSeconds) : -1;
       this.ownClipReady.set(false);
 
-      const { preRollSeconds, postRollSeconds } = this.settings.settings();
       const ownClipPromise = recordsVideo
-        ? this.buffer.extractClip(timestamp, preRollSeconds, postRollSeconds).then((blob) => {
-            this.ownClipReady.set(true);
-            return blob;
-          })
+        ? this.buffer
+            .extractClip(timestamp, preRollSeconds, postRollSeconds, {
+              onClipping: () => {
+                this.status.set('clipping');
+                // Nothing more to record for this shot - stops the encoder before the trim runs.
+                this.buffer.stop();
+              },
+            })
+            .then((blob) => {
+              this.ownClipReady.set(true);
+              if (isMaster && this.session.collectionProgress()) this.status.set('collecting');
+              return blob;
+            })
         : Promise.resolve(null);
-      const [ownBlob, slaveClips] = await Promise.all([
+      if (isMaster && !recordsVideo && this.session.connectedSlaves().length > 0) this.status.set('collecting');
+
+      const [ownBlob, collection] = await Promise.all([
         ownClipPromise,
-        isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve(new Map<string, Blob>()),
+        isMaster ? this.session.collectClips(triggerSeq) : Promise.resolve({ clips: new Map<string, Blob>(), missingIds: [] }),
       ]);
 
       const items: { deviceLabel: string; blob: Blob }[] = [];
       if (ownBlob) items.push({ deviceLabel: isMaster ? 'You (master)' : 'You', blob: ownBlob });
       let index = 1;
-      for (const [slaveId, blob] of slaveClips) {
+      for (const [slaveId, blob] of collection.clips) {
         index += 1;
         items.push({ deviceLabel: `Camera ${index} (${slaveId.slice(-4)})`, blob });
       }
-      const missing = expectedSlaveCount - slaveClips.size;
+      const missing = collection.missingIds.length;
       if (missing > 0) {
-        console.warn(`${missing} device(s) didn't respond in time and are missing from this shot.`);
+        console.warn(`${missing} device(s) didn't deliver a clip and are missing from this shot.`);
       }
 
       if (this.settings.settings().autoSaveClips) {
         this.saveClipsAutomatically(items);
+        restartAfterShot = true;
       } else {
-        this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't respond in time and are missing.` : undefined);
+        this.clipStore.setClips(items, missing > 0 ? `${missing} device(s) didn't deliver a clip and are missing.` : undefined);
         void this.router.navigate(['/review']);
       }
     } catch (err) {
       console.error('Local trigger handling failed', err);
     } finally {
-      // Always clears the 'capturing' state, even on an unexpected error - otherwise the device
+      // Always clears the busy state, even on an unexpected error - otherwise the device
       // would be stuck refusing every future trigger.
-      this.clearCapturingStatus();
+      this.clearBusyStatus();
+      if (restartAfterShot) this.rearmForNextShot();
     }
+  }
+
+  /** Auto-save keeps this page open between shots, so the next shot needs a fresh, short
+   *  recording (rather than one that keeps growing) and slaves - idle since delivering their
+   *  clips - need re-arming, exactly as if the master had just come back to Record. */
+  private rearmForNextShot(): void {
+    const stream = this.camera.stream();
+    if (this.recordsVideo() && stream) this.buffer.start(stream);
+    if (this.session.role() === 'master') this.session.setArmed(true);
   }
 
   /** Downloads every clip from this shot straight to the device, named
@@ -299,17 +437,50 @@ export class Record implements OnInit {
     return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}${pad(date.getMinutes())}`;
   }
 
-  private async handleSlaveTrigger(localTs: number, triggerSeq: number): Promise<void> {
-    if (this.status() === 'capturing') return;
+  private async handleSlaveTrigger(event: LocalTriggerEvent): Promise<void> {
+    const { localTs, triggerSeq, preRollSeconds, postRollSeconds } = event;
+    if (this.busy() || !this.buffer.isRecording()) {
+      // Not recording (never armed, or still delivering the previous shot): tell the master no
+      // clip is coming from here so it doesn't sit waiting for one.
+      this.session.reportDeviceState('idle', triggerSeq);
+      return;
+    }
+
     this.status.set('capturing');
+    // This device has taken its shot - it stays idle until the master arms it again.
+    this.session.consumeArm();
     try {
-      const { preRollSeconds, postRollSeconds } = this.settings.settings();
-      const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds);
+      const blob = await this.buffer.extractClip(localTs, preRollSeconds, postRollSeconds, {
+        onClipping: () => {
+          this.status.set('clipping');
+          this.buffer.stop();
+        },
+      });
+      this.status.set('sending');
+      const acknowledged = this.waitForClipAck(triggerSeq);
       this.session.sendClip(blob, this.buffer.mimeTypeUsed(), triggerSeq);
+      await acknowledged;
     } catch (err) {
       console.error('Slave trigger handling failed', err);
+      this.session.reportDeviceState('error', triggerSeq);
     } finally {
-      this.clearCapturingStatus();
+      this.clearBusyStatus();
+      // Idle unless the master already re-armed this device while it was still delivering.
+      this.applySlaveArm(this.session.armed());
     }
+  }
+
+  private waitForClipAck(triggerSeq: number): Promise<void> {
+    return new Promise((resolve) => {
+      const subscription = this.session.clipAcknowledged$.subscribe((seq) => {
+        if (seq === triggerSeq) done();
+      });
+      const timer = setTimeout(done, CLIP_ACK_TIMEOUT_MS);
+      function done(): void {
+        clearTimeout(timer);
+        subscription.unsubscribe();
+        resolve();
+      }
+    });
   }
 }

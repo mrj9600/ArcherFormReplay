@@ -25,12 +25,23 @@
           <ng-container [ngTemplateOutlet]="statusChip" />
         </mat-chip-set>
 
+        @if (deviceStates().length > 0) {
+          <ul class="device-states">
+            @for (device of deviceStates(); track device.id) {
+              <li>
+                <span class="device-name">{{ device.label }}</span>
+                <span class="device-state">{{ device.state }}</span>
+              </li>
+            }
+          </ul>
+        }
+
         @if (session.isTriggerDevice() && !micUnavailable()) {
           <app-mic-calibration />
         }
 
         @if (showTestButton()) {
-          <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="status() === 'capturing'">
+          <button mat-flat-button color="primary" (click)="testTrigger()" [disabled]="busy()">
             <mat-icon>bolt</mat-icon>
             Manual trigger
           </button>
@@ -47,10 +58,13 @@
         }
         @case ('waiting-for-master') {
           @if (session.isSynced()) {
-            <mat-chip color="primary" highlighted>Connected — waiting for master</mat-chip>
+            <mat-chip color="primary" highlighted>Waiting for master trigger</mat-chip>
           } @else {
             <mat-chip>Synchronizing clock…</mat-chip>
           }
+        }
+        @case ('idle') {
+          <mat-chip>Idle — waiting for master to return to Record</mat-chip>
         }
         @case ('coordinating') {
           <mat-chip color="primary" highlighted>Coordinating session</mat-chip>
@@ -59,10 +73,19 @@
           <mat-chip>No camera/mic on this device — use manual trigger</mat-chip>
         }
         @case ('capturing') {
-          @if (session.role() === 'master' && collectionDisplay(); as progress) {
+          <mat-chip color="accent" highlighted>Capturing…</mat-chip>
+        }
+        @case ('clipping') {
+          <mat-chip color="accent" highlighted>Clipping…</mat-chip>
+        }
+        @case ('sending') {
+          <mat-chip color="accent" highlighted>Sending clip…</mat-chip>
+        }
+        @case ('collecting') {
+          @if (collectionDisplay(); as progress) {
             <mat-chip color="accent" highlighted>Collecting clips… ({{ progress.received }}/{{ progress.expected }})</mat-chip>
           } @else {
-            <mat-chip color="accent" highlighted>Capturing clip…</mat-chip>
+            <mat-chip color="accent" highlighted>Collecting clips…</mat-chip>
           }
         }
       }

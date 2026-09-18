@@ -1,7 +1,9 @@
 import { Injectable, signal } from '@angular/core';
 import { Subject } from 'rxjs';
+import { epochNow } from './time';
 
 export interface TriggerEvent {
+  /** When the release happened, on the epoch clock (see time.ts). */
   timestamp: number;
 }
 
@@ -55,7 +57,7 @@ export class SoundTriggerService {
   }
 
   manualTrigger(): void {
-    this.emitTrigger(performance.now());
+    this.emitTrigger(epochNow());
   }
 
   private loop = (): void => {
@@ -64,15 +66,22 @@ export class SoundTriggerService {
     this.analyser.getFloatTimeDomainData(data);
 
     let peak = 0;
-    for (const sample of data) {
-      const abs = Math.abs(sample);
+    let firstOverIndex = -1;
+    for (let i = 0; i < data.length; i++) {
+      const abs = Math.abs(data[i]);
       if (abs > peak) peak = abs;
+      if (firstOverIndex < 0 && abs >= this.threshold) firstOverIndex = i;
     }
     this.level.set(peak);
 
-    const now = performance.now();
+    const now = epochNow();
     if (peak >= this.threshold && now - this.lastTriggerAt > this.refractoryMs) {
-      this.emitTrigger(now);
+      // The analyser window ends "now", so the sample that first crossed the threshold is
+      // (windowLength - index) samples in the past - the release happened then, not when this
+      // animation frame happened to run (up to ~35ms later).
+      const sampleRate = this.audioContext?.sampleRate ?? 48_000;
+      const ageMs = ((data.length - 1 - firstOverIndex) / sampleRate) * 1000;
+      this.emitTrigger(now - ageMs);
     }
 
     this.rafHandle = requestAnimationFrame(this.loop);

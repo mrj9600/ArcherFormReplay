@@ -1,5 +1,19 @@
 import { AppSettings } from './settings.service';
 
+/** What a camera device is doing right now, as reported by slaves to the master (and shown for
+ *  every device on the master's Record page). 'idle' means not recording and not doing anything
+ *  for a shot - e.g. after finishing one, until the master returns to Record and re-arms it. */
+export type DeviceState = 'idle' | 'armed' | 'capturing' | 'clipping' | 'sending' | 'error';
+
+export const DEVICE_STATE_LABELS: Record<DeviceState, string> = {
+  idle: 'Idle',
+  armed: 'Waiting for trigger',
+  capturing: 'Capturing',
+  clipping: 'Clipping',
+  sending: 'Sending',
+  error: 'Failed',
+};
+
 export interface WelcomeMessage {
   type: 'welcome';
   settings: AppSettings;
@@ -7,22 +21,27 @@ export interface WelcomeMessage {
 
 export interface TriggerMessage {
   type: 'trigger';
-  /** Monotonically increasing id for correlating clips to this trigger. Integers round-trip
-   *  exactly through the wire format; the timestamps below don't reliably (see ClipMessage). */
+  /** Monotonically increasing id for correlating clips to this trigger. */
   triggerSeq: number;
-  /** Trigger timestamp on the master's performance.now() clock. */
-  masterTs: number;
+  /** Trigger time on the master's epoch clock (see time.ts), as a decimal string. */
+  masterTs: string;
+  /** The window every device clips around masterTs, fixed by the master at trigger time so all
+   *  devices cut identical windows even if a setting changed mid-session. */
+  preRollSeconds: number;
+  postRollSeconds: number;
 }
 
 export interface SyncPingMessage {
   type: 'sync-ping';
-  sentAt: number;
+  /** Sender's epoch clock (decimal string). */
+  sentAt: string;
 }
 
 export interface SyncPongMessage {
   type: 'sync-pong';
-  sentAt: number;
-  receivedAt: number;
+  sentAt: string;
+  /** Master's epoch clock when it handled the ping (decimal string). */
+  receivedAt: string;
 }
 
 /**
@@ -37,6 +56,12 @@ export interface ClipMessage {
   data: Blob | ArrayBuffer;
 }
 
+/** Master -> slave: the clip for this trigger arrived intact. */
+export interface ClipAckMessage {
+  type: 'clip-ack';
+  triggerSeq: number;
+}
+
 export interface TriggerAssignmentMessage {
   type: 'trigger-assignment';
   /** MASTER_TRIGGER_ID, or a slave's PeerJS id. */
@@ -45,8 +70,23 @@ export interface TriggerAssignmentMessage {
 
 export interface RemoteTriggerMessage {
   type: 'remote-trigger';
-  /** The reporting device's local detection timestamp, already converted to the master's clock. */
-  estimatedMasterTs: number;
+  /** The reporting device's detection time converted to the master's epoch clock (decimal string). */
+  estimatedMasterTs: string;
+}
+
+/** Master -> slaves: the master is (armed=true) / is no longer (armed=false) on the Record page.
+ *  A slave records only while armed, and after delivering a clip stays idle until re-armed. */
+export interface ArmMessage {
+  type: 'arm';
+  armed: boolean;
+}
+
+/** Slave -> master: this device's state changed. `triggerSeq` is set on the reply to a trigger
+ *  (notably state 'idle' = "I wasn't recording, no clip is coming for this one"). */
+export interface DeviceStateMessage {
+  type: 'device-state';
+  state: DeviceState;
+  triggerSeq?: number;
 }
 
 /** Master -> slaves: the master stopped the session - every slave should leave too. */
@@ -60,8 +100,11 @@ export type SessionMessage =
   | SyncPingMessage
   | SyncPongMessage
   | ClipMessage
+  | ClipAckMessage
   | TriggerAssignmentMessage
   | RemoteTriggerMessage
+  | ArmMessage
+  | DeviceStateMessage
   | SessionEndedMessage;
 
 /** Sentinel triggerDeviceId meaning "the master itself", since the master has no PeerJS id from its own perspective worth tracking separately. */
