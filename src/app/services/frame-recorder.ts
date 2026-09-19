@@ -363,7 +363,10 @@ export class FrameRecorder {
     const width = firstFrame.displayWidth;
     const height = firstFrame.displayHeight;
     this.frameSize = `${width}x${height}`;
-    const bitrate = Math.round(Math.min(10e6, Math.max(2e6, 6e6 * ((width * height) / (1920 * 1080)))));
+    // Scaled by picture size, and by ~1.5x at 60 fps (twice the frames, but consecutive frames are
+    // more alike, so it doesn't need twice the bits).
+    const rateFactor = this.frameRate > 45 ? 1.5 : 1;
+    const bitrate = Math.round(Math.min(14e6, Math.max(2e6, 6e6 * rateFactor * ((width * height) / (1920 * 1080)))));
     for (const choice of CODEC_CHOICES) {
       const config: VideoEncoderConfig = {
         codec: choice.codec,

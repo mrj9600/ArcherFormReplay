@@ -94,6 +94,10 @@ export class Settings implements OnInit {
     this.settingsService.update({ preciseCapture: (event.target as HTMLInputElement).checked });
   }
 
+  protected onFrameRateChange(event: Event): void {
+    this.settingsService.update({ frameRate: Number((event.target as HTMLSelectElement).value) });
+  }
+
   protected onTimingOffsetChange(event: Event): void {
     const value = Number((event.target as HTMLInputElement).value);
     this.settingsService.update({ videoTimingOffsetMs: Number.isFinite(value) ? value : 0 });

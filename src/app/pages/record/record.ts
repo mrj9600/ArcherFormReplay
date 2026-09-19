@@ -137,10 +137,20 @@ export class Record implements OnInit {
             : 'not recording',
     });
     rows.push({ key: 'Frame timestamps', value: this.buffer.timing() ?? '-' });
+    const trackSettings = this.camera.stream()?.getVideoTracks()[0]?.getSettings();
+    rows.push({
+      key: 'Camera granted',
+      value: trackSettings
+        ? `${trackSettings.width ?? '?'}x${trackSettings.height ?? '?'} @${trackSettings.frameRate !== undefined ? num(trackSettings.frameRate, 1) : '?'}fps (asked ${this.settings.settings().frameRate}fps, 1280x720)`
+        : 'no camera',
+    });
     if (stats) {
       rows.push({ key: 'Codec', value: `${stats.codec || '-'} ${stats.size} @${num(stats.fps, 0)}fps` });
       rows.push({ key: 'Frames', value: `${stats.framesIn} in, ${stats.framesDropped} dropped, ${stats.bufferedFrames} buffered (${num(stats.bufferedSeconds)}s)` });
-      rows.push({ key: 'Frame interval', value: `${num(stats.intervalMeanMs)}ms avg, max dev ${num(stats.intervalMaxDevMs)}ms` });
+      rows.push({
+        key: 'Frame interval',
+        value: `${num(stats.intervalMeanMs)}ms avg (~${stats.intervalMeanMs > 0 ? num(1000 / stats.intervalMeanMs, 1) : '-'} fps delivered), max dev ${num(stats.intervalMaxDevMs)}ms`,
+      });
       if (stats.arrivalJitterMs !== null) {
         rows.push({ key: 'Arrival jitter (smoothed out)', value: `${num(stats.arrivalJitterMs)}ms` });
       }

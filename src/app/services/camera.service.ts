@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { SettingsService } from './settings.service';
 
 export type CameraPreference = { mode: 'default' } | { mode: 'front' } | { mode: 'device'; deviceId: string };
 
@@ -6,6 +7,8 @@ const PREFERENCE_KEY = 'archer-form-replay.cameraPreference';
 
 @Injectable({ providedIn: 'root' })
 export class CameraService {
+  private readonly settingsService = inject(SettingsService);
+
   readonly stream = signal<MediaStream | null>(null);
   readonly devices = signal<MediaDeviceInfo[]>([]);
   readonly error = signal<string | null>(null);
@@ -74,7 +77,15 @@ export class CameraService {
       preference.mode === 'device'
         ? { deviceId: { exact: preference.deviceId } }
         : { facingMode: preference.mode === 'front' ? 'user' : 'environment' };
-    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: withAudio });
+    // Best-effort requests (ideal, never exact, so a camera that can't do it still opens): 720p is
+    // enough detail for form review and the most that phones reliably offer at 60 fps.
+    const constrained: MediaTrackConstraints = {
+      ...video,
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: this.settingsService.settings().frameRate },
+    };
+    const stream = await navigator.mediaDevices.getUserMedia({ video: constrained, audio: withAudio });
     this.stream.set(stream);
     this.error.set(null);
     await this.listCameras();

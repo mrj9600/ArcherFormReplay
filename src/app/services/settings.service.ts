@@ -17,10 +17,12 @@ export interface AppSettings {
   preciseCapture: boolean;
   /** Local to this device: shifts this camera's frames earlier (positive) on the shared timeline, to cancel a constant camera/encoder delay measured with the sync clock. */
   videoTimingOffsetMs: number;
+  /** Local to this device: the frame rate asked of the camera (30 or 60) - best effort, the browser reports what it actually granted. */
+  frameRate: number;
 }
 
 /** Settings that describe this device's own hardware and are never overwritten by the master's. */
-export const DEVICE_LOCAL_SETTINGS = ['preciseCapture', 'videoTimingOffsetMs'] as const;
+export const DEVICE_LOCAL_SETTINGS = ['preciseCapture', 'videoTimingOffsetMs', 'frameRate'] as const;
 
 export const AUTO_RETURN_MANUAL = -1;
 
@@ -33,6 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoSaveClips: false,
   preciseCapture: true,
   videoTimingOffsetMs: 0,
+  frameRate: 30,
 };
 
 const STORAGE_KEY = 'archer-form-replay.settings';

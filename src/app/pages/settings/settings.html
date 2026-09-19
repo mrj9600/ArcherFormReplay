@@ -123,6 +123,23 @@
   </div>
 
   <div class="setting">
+    <label for="frameRate">
+      <mat-icon>speed</mat-icon>
+      Camera frame rate
+    </label>
+    <select id="frameRate" (change)="onFrameRateChange($event)">
+      <option value="30" [selected]="settingsService.settings().frameRate === 30">30 fps</option>
+      <option value="60" [selected]="settingsService.settings().frameRate === 60">60 fps (if the camera supports it)</option>
+    </select>
+    <p class="hint">
+      This device only; takes effect the next time Record opens. 60 fps halves the frame-timing
+      limit between cameras and gives smoother slow motion, but needs more light (dim rooms may
+      fall back to 30), makes bigger clips and works the phone harder. The frame rate actually
+      granted is shown under Timing debug on Record.
+    </p>
+  </div>
+
+  <div class="setting">
     <label for="timingOffset">
       <mat-icon>schedule</mat-icon>
       Camera timing offset (ms)
