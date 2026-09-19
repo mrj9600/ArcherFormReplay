@@ -138,6 +138,13 @@ export class Record implements OnInit {
     });
     rows.push({ key: 'Frame timestamps', value: this.buffer.timing() ?? '-' });
     const trackSettings = this.camera.stream()?.getVideoTracks()[0]?.getSettings();
+    const caps = this.camera.stream()?.getVideoTracks()[0]?.getCapabilities?.();
+    if (caps) {
+      rows.push({
+        key: 'Camera reports',
+        value: `up to ${caps.frameRate?.max ?? '?'} fps, ${caps.width?.max ?? '?'}x${caps.height?.max ?? '?'}`,
+      });
+    }
     rows.push({
       key: 'Camera granted',
       value: trackSettings

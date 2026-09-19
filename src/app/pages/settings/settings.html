@@ -137,6 +137,28 @@
       fall back to 30), makes bigger clips and works the phone harder. The frame rate actually
       granted is shown under Timing debug on Record.
     </p>
+    <button type="button" class="probe-button" [disabled]="probeRunning()" (click)="probeCameraFrameRates()">
+      {{ probeRunning() ? 'Testing camera…' : 'Test camera frame rates' }}
+    </button>
+    @if (probeResult(); as result) {
+      <div class="probe-result">
+        <p>Camera reports: {{ result.capabilities }}</p>
+        <table>
+          <thead>
+            <tr><th>Size</th><th>Normal</th><th>At least 50 fps</th></tr>
+          </thead>
+          <tbody>
+            @for (row of result.rows; track row.size) {
+              <tr><td>{{ row.size }}</td><td>{{ row.normal }}</td><td>{{ row.highRate }}</td></tr>
+            }
+          </tbody>
+        </table>
+        <p class="hint">
+          Uses the camera chosen above. If "At least 50 fps" is not offered at any size, this
+          browser only exposes 30 fps for that camera - nothing the app can change.
+        </p>
+      </div>
+    }
   </div>
 
   <div class="setting">

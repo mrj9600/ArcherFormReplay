@@ -3,6 +3,12 @@ import { SettingsService } from './settings.service';
 
 export type CameraPreference = { mode: 'default' } | { mode: 'front' } | { mode: 'device'; deviceId: string };
 
+export interface FrameRateProbe {
+  /** What the camera track itself reports as its limits. */
+  capabilities: string;
+  rows: { size: string; normal: string; highRate: string }[];
+}
+
 const PREFERENCE_KEY = 'archer-form-replay.cameraPreference';
 
 @Injectable({ providedIn: 'root' })
@@ -72,24 +78,117 @@ export class CameraService {
     this.stream.set(null);
   }
 
+  private videoBase(preference: CameraPreference): MediaTrackConstraints {
+    return preference.mode === 'device'
+      ? { deviceId: { exact: preference.deviceId } }
+      : { facingMode: preference.mode === 'front' ? 'user' : 'environment' };
+  }
+
   private async open(preference: CameraPreference, withAudio: boolean): Promise<MediaStream> {
-    const video: MediaTrackConstraints =
-      preference.mode === 'device'
-        ? { deviceId: { exact: preference.deviceId } }
-        : { facingMode: preference.mode === 'front' ? 'user' : 'environment' };
-    // Best-effort requests (ideal, never exact, so a camera that can't do it still opens): 720p is
-    // enough detail for form review and the most that phones reliably offer at 60 fps.
-    const constrained: MediaTrackConstraints = {
-      ...video,
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: this.settingsService.settings().frameRate },
-    };
-    const stream = await navigator.mediaDevices.getUserMedia({ video: constrained, audio: withAudio });
+    const base = this.videoBase(preference);
+    const fps = this.settingsService.settings().frameRate;
+    // 720p is enough detail for form review and the most phones reliably offer at 60 fps. With ideal
+    // (soft) constraints the browser may settle for a 30 fps format that happens to match 720p best,
+    // so a 60 fps request first tries a hard "at least 50 fps" - any resolution that can do it wins -
+    // and only falls back to the soft request if no format qualifies.
+    const attempts: MediaTrackConstraints[] = [];
+    if (fps > 45) {
+      attempts.push({ ...base, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { min: 50, ideal: fps } });
+    }
+    attempts.push({ ...base, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: fps } });
+
+    let stream: MediaStream | null = null;
+    for (const video of attempts) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video, audio: withAudio });
+        break;
+      } catch (err) {
+        if ((err as { name?: string })?.name !== 'OverconstrainedError') throw err;
+      }
+    }
+    if (!stream) throw new Error('No camera format matched the requested settings');
     this.stream.set(stream);
     this.error.set(null);
     await this.listCameras();
     return stream;
+  }
+
+  /**
+   * Finds out what this camera really offers: for each resolution, what the browser grants by
+   * default and whether it will give at least 50 fps, each with the frame rate actually delivered
+   * over about a second (a granted setting and real delivery can differ). Uses the currently
+   * chosen camera. Meant for the Settings page's "test camera frame rates" button.
+   */
+  async probeFrameRates(): Promise<FrameRateProbe> {
+    const base = this.videoBase(this.preference());
+    const sizes: [number, number][] = [
+      [640, 480],
+      [1280, 720],
+      [1920, 1080],
+    ];
+    let capabilities = 'unknown';
+    const rows: FrameRateProbe['rows'] = [];
+    for (const [width, height] of sizes) {
+      const size = `${width}x${height}`;
+      const normal = await this.tryFormat({ ...base, width: { exact: width }, height: { exact: height } });
+      const highRate = await this.tryFormat({ ...base, width: { exact: width }, height: { exact: height }, frameRate: { min: 50 } });
+      if (capabilities === 'unknown') capabilities = normal.capabilities ?? highRate.capabilities ?? 'unknown';
+      rows.push({ size, normal: normal.text, highRate: highRate.text });
+    }
+    return { capabilities, rows };
+  }
+
+  private async tryFormat(video: MediaTrackConstraints): Promise<{ text: string; capabilities?: string }> {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video });
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings();
+      const caps = typeof track.getCapabilities === 'function' ? track.getCapabilities() : undefined;
+      const capabilities = caps
+        ? `up to ${caps.frameRate?.max ?? '?'} fps, ${caps.width?.max ?? '?'}x${caps.height?.max ?? '?'}`
+        : undefined;
+      const delivered = await this.measureDeliveredFps(stream);
+      return {
+        text: `granted ${settings.frameRate ?? '?'} fps, delivered ${delivered !== null ? delivered.toFixed(1) : '?'} fps`,
+        capabilities,
+      };
+    } catch (err) {
+      return { text: `not offered (${(err as { name?: string })?.name ?? 'error'})` };
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
+  }
+
+  private async measureDeliveredFps(stream: MediaStream): Promise<number | null> {
+    const video = document.createElement('video');
+    if (!('requestVideoFrameCallback' in video)) return null;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    try {
+      await video.play();
+    } catch {
+      return null;
+    }
+    let count = 0;
+    let firstAt = 0;
+    let lastAt = 0;
+    const startedAt = performance.now();
+    await new Promise<void>((resolve) => {
+      const onFrame = (now: number) => {
+        count++;
+        if (!firstAt) firstAt = now;
+        lastAt = now;
+        if (performance.now() - startedAt < 1200) video.requestVideoFrameCallback(onFrame);
+        else resolve();
+      };
+      video.requestVideoFrameCallback(onFrame);
+      setTimeout(resolve, 3000);
+    });
+    video.pause();
+    video.srcObject = null;
+    return count > 2 && lastAt > firstAt ? (count - 1) / ((lastAt - firstAt) / 1000) : null;
   }
 
   private loadPreference(): CameraPreference {

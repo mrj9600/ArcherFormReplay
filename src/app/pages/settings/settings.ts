@@ -3,7 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { AUTO_RETURN_MANUAL, SettingsService } from '../../services/settings.service';
 import { SoundTriggerService } from '../../services/sound-trigger.service';
-import { CameraService } from '../../services/camera.service';
+import { CameraService, FrameRateProbe } from '../../services/camera.service';
 import { APP_VERSION } from '../../version';
 import { MicCalibration } from '../../components/mic-calibration/mic-calibration';
 
@@ -92,6 +92,19 @@ export class Settings implements OnInit {
 
   protected onPreciseCaptureChange(event: Event): void {
     this.settingsService.update({ preciseCapture: (event.target as HTMLInputElement).checked });
+  }
+
+  protected readonly probeRunning = signal(false);
+  protected readonly probeResult = signal<FrameRateProbe | null>(null);
+
+  protected async probeCameraFrameRates(): Promise<void> {
+    this.probeRunning.set(true);
+    this.probeResult.set(null);
+    try {
+      this.probeResult.set(await this.camera.probeFrameRates());
+    } finally {
+      this.probeRunning.set(false);
+    }
   }
 
   protected onFrameRateChange(event: Event): void {
